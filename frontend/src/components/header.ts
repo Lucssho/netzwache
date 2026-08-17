@@ -18,7 +18,7 @@ export function renderHeader(
   el.innerHTML = `
     <div class="brand">
       <div class="brand-text">
-        <h1>CYBER DOME</h1>
+        <h1>CYBER SHIELD</h1>
         <div class="sub">Multi-Plattform Lagebild &middot; OSINT Collector</div>
       </div>
     </div>
@@ -38,7 +38,7 @@ export function renderHeader(
       </div>
       <div class="hstat">
         <div class="k">Beiträge gesamt</div>
-        <div class="v green">${num(total)}</div>
+        <div class="v">${num(total)}</div>
       </div>
       <div class="hstat">
         <div class="k">Stream</div>
@@ -50,7 +50,7 @@ export function renderHeader(
       <div class="tick-ring" title="Nächster Sammellauf">
         <svg width="46" height="46">
           <circle cx="23" cy="23" r="18" stroke="#1b2830" stroke-width="3" fill="none"/>
-          <circle cx="23" cy="23" r="18" stroke="#4ee07a" stroke-width="3" fill="none"
+          <circle cx="23" cy="23" r="18" stroke="#ff6a1a" stroke-width="3" fill="none"
                   stroke-linecap="round"
                   stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct)}"/>
         </svg>

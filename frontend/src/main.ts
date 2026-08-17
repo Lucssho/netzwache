@@ -2,7 +2,7 @@ import "./styles.css";
 
 import { api } from "./api";
 import { renderDiagnosticsPanel } from "./components/diagnosticsPanel";
-import { attachExpand, postCard, renderFeed } from "./components/feed";
+import { attachExpand, postCard, renderFeed, squareCard, type FeedVariant } from "./components/feed";
 import { renderHeader } from "./components/header";
 import { applySettings, renderSettingsPanel } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
@@ -33,6 +33,9 @@ const state = {
   settings: { ...DEFAULT_SETTINGS } as UiSettings,
   diagnostics: null as Diagnostics | null,
   sourcesOpen: true,
+  leftColOpen: true,
+  lagebildOpen: true,
+  feedVariant: "list" as FeedVariant,
   filters: {
     platform: "all",
     category: "all",
@@ -50,7 +53,7 @@ applySettings(state.settings);
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <header class="top">
-    <div class="traffic" title="CYBER DOME">
+    <div class="traffic" title="CYBER SHIELD">
       <i class="tr-red"></i><i class="tr-amber"></i><i class="tr-green" id="tr-green"></i>
     </div>
     <div id="header-inner"></div>
@@ -75,36 +78,55 @@ app.innerHTML = `
     </div>
   </div>
 
-  <div class="main">
+  <div class="main" id="main-grid">
     <div class="col col-left">
-      <section class="panel" style="flex:1 1 auto">
-        <div class="panel-head">
-          <span class="panel-title">Suchbegriffe</span>
-          <span style="font-size:0.73rem;color:var(--dimmer)" id="term-count"></span>
-        </div>
-        <div class="panel-body">
-          <div id="term-status" class="term-status"></div>
-          <div id="terms"></div>
-        </div>
-      </section>
-      <section class="panel" style="flex:1 1 auto">
-        <div class="panel-head">
-          <span class="panel-title">Quellen</span>
-          <button id="btn-sources-toggle" class="icon-btn lg chevron open" title="Quellen ein-/ausblenden">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="M3 4.5 6 8l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <div class="col-outer" id="col-outer-left">
+        <div class="col-outer-head">
+          <span class="panel-title" id="left-outer-title">Suchraum</span>
+          <button id="btn-leftcol-toggle" class="icon-btn collapse-toggle" title="Suchraum ein-/ausblenden">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M8.5 3.5 4.5 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 3.5 8 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
         </div>
-        <div class="panel-body tight" id="sources"></div>
-      </section>
+        <div class="col-outer-body" id="left-outer-body">
+          <section class="panel" style="flex:1 1 auto">
+            <div class="panel-head">
+              <span class="panel-title">Suchbegriffe</span>
+              <span style="font-size:0.73rem;color:var(--dimmer)" id="term-count"></span>
+            </div>
+            <div class="panel-body">
+              <div id="term-status" class="term-status"></div>
+              <div id="terms"></div>
+            </div>
+          </section>
+          <section class="panel" style="flex:1 1 auto">
+            <div class="panel-head">
+              <span class="panel-title">Quellen</span>
+              <button id="btn-sources-toggle" class="icon-btn lg chevron open" title="Quellen ein-/ausblenden">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M3 4.5 6 8l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+            <div class="panel-body tight" id="sources"></div>
+          </section>
+        </div>
+      </div>
     </div>
 
     <div class="col">
       <section class="panel" style="flex:1 1 auto">
         <div class="panel-head">
           <span class="panel-title">Live-Feed</span>
-          <span style="font-size:0.73rem;color:var(--dimmer)" id="feed-info"></span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:0.73rem;color:var(--dimmer)" id="feed-info"></span>
+            <div class="seg" id="feed-variant-toggle">
+              <button type="button" data-v="list" class="active" title="Liste">☰</button>
+              <button type="button" data-v="grid" title="Kacheln">▦</button>
+            </div>
+          </div>
         </div>
         <div class="panel-body tight" id="feed-scroll">
           <div class="feed" id="feed"></div>
@@ -114,7 +136,15 @@ app.innerHTML = `
 
     <div class="col col-right">
       <section class="panel" style="flex:1 1 auto">
-        <div class="panel-head"><span class="panel-title">Lagebild</span></div>
+        <div class="panel-head">
+          <span class="panel-title" id="lagebild-title">Lagebild</span>
+          <button id="btn-lagebild-toggle" class="icon-btn collapse-toggle flip" title="Lagebild ein-/ausblenden">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M8.5 3.5 4.5 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 3.5 8 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
         <div class="panel-body" id="stats"></div>
       </section>
     </div>
@@ -138,12 +168,18 @@ const els = {
   popDiag: $("pop-diag"),
   sources: $("sources"),
   btnSourcesToggle: $<HTMLButtonElement>("btn-sources-toggle"),
+  mainGrid: $("main-grid"),
+  colOuterLeft: $("col-outer-left"),
+  btnLeftColToggle: $<HTMLButtonElement>("btn-leftcol-toggle"),
+  lagebildTitle: $("lagebild-title"),
+  btnLagebildToggle: $<HTMLButtonElement>("btn-lagebild-toggle"),
   terms: $("terms"),
   termStatus: $("term-status"),
   termCount: $("term-count"),
   feed: $("feed"),
   feedScroll: $("feed-scroll"),
   feedInfo: $("feed-info"),
+  feedVariantToggle: $("feed-variant-toggle"),
   stats: $("stats"),
   toasts: $("toasts"),
 };
@@ -220,7 +256,7 @@ function filterLabel(): string {
 // ---------------------------------------------------------------- Render
 function paintFeed(): void {
   const visible = state.posts.filter(matchesFilter).slice(0, 200);
-  renderFeed(els.feed, visible, hasActiveFilter());
+  renderFeed(els.feed, visible, hasActiveFilter(), state.feedVariant);
   els.feedInfo.textContent = `${visible.length} sichtbar / ${state.posts.length} im Puffer`;
 }
 
@@ -413,6 +449,10 @@ function prependPosts(incoming: Post[]): void {
     els.feedInfo.textContent = `${els.feed.children.length} sichtbar / ${state.posts.length} im Puffer`;
     return;
   }
+  if (state.feedVariant === "grid") {
+    paintFeed();
+    return;
+  }
   const atTop = els.feedScroll.scrollTop < 60;
   els.feed.insertAdjacentHTML("afterbegin", visible.map((p) => postCard(p, true)).join(""));
   while (els.feed.children.length > 200) els.feed.lastElementChild?.remove();
@@ -445,6 +485,32 @@ els.btnSourcesToggle.addEventListener("click", () => {
   state.sourcesOpen = !state.sourcesOpen;
   els.sources.classList.toggle("collapsed", !state.sourcesOpen);
   els.btnSourcesToggle.classList.toggle("open", state.sourcesOpen);
+});
+
+els.btnLeftColToggle.addEventListener("click", () => {
+  state.leftColOpen = !state.leftColOpen;
+  els.colOuterLeft.classList.toggle("collapsed", !state.leftColOpen);
+  els.btnLeftColToggle.classList.toggle("flip", !state.leftColOpen);
+  els.mainGrid.classList.toggle("left-collapsed", !state.leftColOpen);
+});
+
+els.btnLagebildToggle.addEventListener("click", () => {
+  state.lagebildOpen = !state.lagebildOpen;
+  els.lagebildTitle.style.display = state.lagebildOpen ? "" : "none";
+  els.stats.classList.toggle("collapsed", !state.lagebildOpen);
+  els.btnLagebildToggle.classList.toggle("flip", state.lagebildOpen);
+  els.mainGrid.classList.toggle("right-collapsed", !state.lagebildOpen);
+});
+
+els.feedVariantToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
+  b.addEventListener("click", () => {
+    const variant = b.dataset.v as FeedVariant;
+    if (variant === state.feedVariant) return;
+    state.feedVariant = variant;
+    els.feedVariantToggle.querySelectorAll("button").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    paintFeed();
+  });
 });
 
 els.btnPause.addEventListener("click", togglePause);

@@ -62,7 +62,23 @@ export function postCard(p: Post, isNew = false): string {
   </article>`;
 }
 
-export function renderFeed(el: HTMLElement, posts: Post[], hasFilter: boolean): void {
+export type FeedVariant = "list" | "grid";
+
+export function squareCard(p: Post): string {
+  const platform = PLATFORM_LABEL[p.platform] ?? p.platform;
+  const tag = p.url ? "a" : "article";
+  const linkAttrs = p.url ? ` href="${esc(p.url)}" target="_blank" rel="noopener noreferrer"` : "";
+  return `
+  <${tag} class="post-square ${esc(p.platform)}" data-id="${p.id}"${linkAttrs}>
+    <span class="pbadge ${esc(p.platform)}">${platformIcon(p.platform, 12)}<span>${esc(platform)}</span></span>
+    <div class="sq-title">${esc(p.title || p.text || "")}</div>
+    <span class="sq-time">${relTime(p.collected_at)}</span>
+  </${tag}>`;
+}
+
+export function renderFeed(el: HTMLElement, posts: Post[], hasFilter: boolean, variant: FeedVariant = "list"): void {
+  el.classList.toggle("variant-grid", variant === "grid");
+
   if (!posts.length) {
     el.innerHTML = `
       <div class="empty">
@@ -73,6 +89,11 @@ export function renderFeed(el: HTMLElement, posts: Post[], hasFilter: boolean): 
             : "Warte auf den ersten Sammellauf …<br>Quellen links anklicken, um sofort zu sammeln."
         }
       </div>`;
+    return;
+  }
+
+  if (variant === "grid") {
+    el.innerHTML = posts.map((p) => squareCard(p)).join("");
     return;
   }
   el.innerHTML = posts.map((p) => postCard(p)).join("");
