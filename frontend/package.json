@@ -1,0 +1,20 @@
+{
+  "name": "netzwache-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "NETZWACHE - Live-Dashboard im Linux-Terminal-Stil",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 8080",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}

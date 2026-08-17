@@ -1,0 +1,24 @@
+# Umgebung / Geheimnisse
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+*.db
+*.sqlite3
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+*.log
+
+# Editoren / OS
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "NETZWACHE Backend (SQLite, ohne Docker)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8000"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "DATABASE_URL": "sqlite+aiosqlite:///./netzwache.db",
+        "REDIS_URL": "redis://127.0.0.1:6379/0",
+        "LOG_LEVEL": "INFO"
+      },
+      "justMyCode": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "NETZWACHE Backend (Docker-Postgres auf 5433)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8000"],
+      "cwd": "${workspaceFolder}/backend",
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://netzwache:netzwache@localhost:5433/netzwache",
+        "REDIS_URL": "redis://localhost:6380/0"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Selbsttest der Quellen",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.selftest",
+      "cwd": "${workspaceFolder}/backend",
+      "console": "integratedTerminal"
+    }
+  ]
+}

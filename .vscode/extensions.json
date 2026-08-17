@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "ms-azuretools.vscode-docker",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "humao.rest-client"
+  ]
+}
