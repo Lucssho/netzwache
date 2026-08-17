@@ -2,6 +2,12 @@ import type { Term } from "../types";
 import { esc } from "../utils";
 
 const CATEGORIES = ["cybersecurity", "it", "nachrichten", "alltag"];
+const CATEGORY_LABEL: Record<string, string> = {
+  cybersecurity: "cybersecurity",
+  it: "it",
+  nachrichten: "news",
+  alltag: "alltag",
+};
 
 export function renderTerms(
   el: HTMLElement,
@@ -17,7 +23,7 @@ export function renderTerms(
     <form class="term-input" id="term-form" autocomplete="off">
       <input id="term-input" placeholder="neuer Suchbegriff …" maxlength="120" />
       <select id="term-cat">
-        ${CATEGORIES.map((c) => `<option value="${c}">${c.slice(0, 6)}</option>`).join("")}
+        ${CATEGORIES.map((c) => `<option value="${c}">${CATEGORY_LABEL[c]}</option>`).join("")}
       </select>
       <button type="submit" class="btn-go" title="Begriff hinzufügen und sofort danach suchen">+</button>
     </form>

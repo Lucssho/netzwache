@@ -212,7 +212,7 @@ Fertig – Scheduler, Statusanzeige, Filter-Tab und Dashboard ziehen den Rest au
 
 ```bash
 cd backend
-pip install pytest pytest-asyncio
+pip install -r requirements.txt
 python -m pytest            # 26 Tests: Anreicherung, alle Collector (gemockt), API-Flow, Dedup
 ```
 

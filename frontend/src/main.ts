@@ -4,13 +4,12 @@ import { api } from "./api";
 import { renderDiagnosticsPanel } from "./components/diagnosticsPanel";
 import { attachExpand, postCard, renderFeed } from "./components/feed";
 import { renderHeader } from "./components/header";
-import { renderLogbar } from "./components/logbar";
 import { applySettings, renderSettingsPanel } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
 import { renderTerms } from "./components/terms";
 import { platformIcon } from "./icons";
-import type { Diagnostics, Filters, LogEntry, Post, SourceState, Stats, Term, UiSettings } from "./types";
+import type { Diagnostics, Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
 import { esc } from "./utils";
 import { LiveStream } from "./ws";
 
@@ -28,14 +27,12 @@ const state = {
   sources: [] as SourceState[],
   terms: [] as Term[],
   stats: null as Stats | null,
-  log: [] as LogEntry[],
   connected: false,
   tickSeconds: 10,
   nextTick: 10,
-  dedup: "…",
-  wsClients: 0,
   settings: { ...DEFAULT_SETTINGS } as UiSettings,
   diagnostics: null as Diagnostics | null,
+  sourcesOpen: true,
   filters: {
     platform: "all",
     category: "all",
@@ -53,7 +50,7 @@ applySettings(state.settings);
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <header class="top">
-    <div class="traffic" title="NETZWACHE">
+    <div class="traffic" title="CYBER DOME">
       <i class="tr-red"></i><i class="tr-amber"></i><i class="tr-green" id="tr-green"></i>
     </div>
     <div id="header-inner"></div>
@@ -64,10 +61,6 @@ app.innerHTML = `
     <div class="tabs" id="tab-category"></div>
     <div class="search-wrap">
       <input id="search" placeholder="Volltextsuche im Feed …" autocomplete="off" />
-    </div>
-    <div class="sev-wrap">
-      SEV ≥ <input type="range" id="sev" min="0" max="100" step="10" value="0" />
-      <span id="sev-val">0</span>
     </div>
     <button id="btn-pause" class="btn-ghost" title="Live-Stream anhalten (Leertaste)">⏸ Pause</button>
     <button id="btn-collect" class="btn-go" title="Alle Quellen sofort abfragen">▶ Jetzt sammeln</button>
@@ -86,13 +79,6 @@ app.innerHTML = `
     <div class="col col-left">
       <section class="panel" style="flex:1 1 auto">
         <div class="panel-head">
-          <span class="panel-title">Quellen</span>
-          <span style="font-size:0.73rem;color:var(--dimmer)">Klick = sammeln</span>
-        </div>
-        <div class="panel-body tight" id="sources"></div>
-      </section>
-      <section class="panel" style="flex:1 1 auto">
-        <div class="panel-head">
           <span class="panel-title">Suchbegriffe</span>
           <span style="font-size:0.73rem;color:var(--dimmer)" id="term-count"></span>
         </div>
@@ -100,6 +86,17 @@ app.innerHTML = `
           <div id="term-status" class="term-status"></div>
           <div id="terms"></div>
         </div>
+      </section>
+      <section class="panel" style="flex:1 1 auto">
+        <div class="panel-head">
+          <span class="panel-title">Quellen</span>
+          <button id="btn-sources-toggle" class="icon-btn lg chevron open" title="Quellen ein-/ausblenden">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d="M3 4.5 6 8l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="panel-body tight" id="sources"></div>
       </section>
     </div>
 
@@ -123,7 +120,6 @@ app.innerHTML = `
     </div>
   </div>
 
-  <footer class="logbar" id="logbar"></footer>
   <div class="toast-wrap" id="toasts"></div>
 `;
 
@@ -134,8 +130,6 @@ const els = {
   tabPlatform: $("tab-platform"),
   tabCategory: $("tab-category"),
   search: $<HTMLInputElement>("search"),
-  sev: $<HTMLInputElement>("sev"),
-  sevVal: $("sev-val"),
   btnPause: $<HTMLButtonElement>("btn-pause"),
   btnCollect: $<HTMLButtonElement>("btn-collect"),
   btnDisplay: $<HTMLButtonElement>("btn-display"),
@@ -143,6 +137,7 @@ const els = {
   btnDiag: $<HTMLButtonElement>("btn-diag"),
   popDiag: $("pop-diag"),
   sources: $("sources"),
+  btnSourcesToggle: $<HTMLButtonElement>("btn-sources-toggle"),
   terms: $("terms"),
   termStatus: $("term-status"),
   termCount: $("term-count"),
@@ -150,7 +145,6 @@ const els = {
   feedScroll: $("feed-scroll"),
   feedInfo: $("feed-info"),
   stats: $("stats"),
-  logbar: $("logbar"),
   toasts: $("toasts"),
 };
 
@@ -321,15 +315,6 @@ function paintTerms(freshId?: number): void {
   );
 }
 
-function paintLogbar(): void {
-  renderLogbar(els.logbar, state.log[0] ?? null, {
-    dedup: state.dedup,
-    ws: state.wsClients,
-    total: state.stats?.total ?? 0,
-    ticks: state.stats?.ticks ?? 0,
-  });
-}
-
 function toast(message: string, isError = false): void {
   const node = document.createElement("div");
   node.className = `toast ${isError ? "err" : ""}`;
@@ -438,16 +423,11 @@ function prependPosts(incoming: Post[]): void {
 
 async function refreshStats(): Promise<void> {
   try {
-    const [stats, health] = await Promise.all([api.stats(), api.health().catch(() => null)]);
+    const stats = await api.stats();
     state.stats = stats;
-    if (health) {
-      state.dedup = String((health as any).dedup_backend ?? state.dedup);
-      state.wsClients = Number((health as any).ws_clients ?? state.wsClients);
-    }
     renderStats(els.stats, state.stats);
     renderTabs();
     paintHeader();
-    paintLogbar();
   } catch {
     /* Backend noch nicht bereit */
   }
@@ -461,10 +441,10 @@ els.search.addEventListener("input", () => {
   (els.search as any)._t = setTimeout(() => void reloadPosts(), 320);
 });
 
-els.sev.addEventListener("input", () => {
-  state.filters.minSeverity = Number(els.sev.value);
-  els.sevVal.textContent = els.sev.value;
-  paintFeed();
+els.btnSourcesToggle.addEventListener("click", () => {
+  state.sourcesOpen = !state.sourcesOpen;
+  els.sources.classList.toggle("collapsed", !state.sourcesOpen);
+  els.btnSourcesToggle.classList.toggle("open", state.sourcesOpen);
 });
 
 els.btnPause.addEventListener("click", togglePause);
@@ -517,10 +497,8 @@ const stream = new LiveStream((event, data) => {
       state.nextTick = state.tickSeconds;
       state.posts = (data.posts as Post[]).slice().reverse();
       state.sources = data.sources;
-      state.log = data.log.slice().reverse();
       paintFeed();
       paintSources();
-      paintLogbar();
       break;
     case "posts":
       prependPosts(data as Post[]);
@@ -528,10 +506,6 @@ const stream = new LiveStream((event, data) => {
     case "sources":
       state.sources = data;
       paintSources();
-      break;
-    case "log":
-      state.log = [data, ...state.log].slice(0, 60);
-      paintLogbar();
       break;
     case "settings":
       // Änderung auf einem anderen Gerät -> hier ebenfalls übernehmen
@@ -550,14 +524,11 @@ const stream = new LiveStream((event, data) => {
 async function boot(): Promise<void> {
   renderTabs();
   paintHeader();
-  paintLogbar();
 
   try {
     const health: any = await api.health();
     state.tickSeconds = Number(health.tick_seconds ?? 10);
     state.nextTick = state.tickSeconds;
-    state.dedup = String(health.dedup_backend ?? "?");
-    state.wsClients = Number(health.ws_clients ?? 0);
   } catch {
     toast("Backend nicht erreichbar – läuft es auf Port 8000?", true);
   }

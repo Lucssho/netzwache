@@ -66,7 +66,7 @@ export function renderFeed(el: HTMLElement, posts: Post[], hasFilter: boolean): 
   if (!posts.length) {
     el.innerHTML = `
       <div class="empty">
-        <span class="big">▚</span>
+        <span class="big">∅</span>
         ${
           hasFilter
             ? "Keine Treffer für diesen Filter.<br>Filter zurücksetzen oder Suchbegriff ergänzen."

@@ -1,23 +1,6 @@
 import type { Stats } from "../types";
 import { clock, num, uptime } from "../utils";
 
-const SHIELD = `
-<svg width="42" height="46" viewBox="0 0 42 46" fill="none" aria-hidden="true">
-  <defs>
-    <linearGradient id="flag" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#141414"/>
-      <stop offset="45%" stop-color="#c8102e"/>
-      <stop offset="100%" stop-color="#ffcc00"/>
-    </linearGradient>
-  </defs>
-  <path d="M21 2 3 8v14c0 12 8 18.5 18 22 10-3.5 18-10 18-22V8z"
-        fill="#0b1114" stroke="url(#flag)" stroke-width="2.2"/>
-  <path d="M21 6.5 7 11v11c0 9.6 6.4 14.8 14 17.7 7.6-2.9 14-8.1 14-17.7V11z"
-        fill="none" stroke="#4ee07a" stroke-width="1" opacity="0.45"/>
-  <path d="M13 22.5h16M21 14.5v16" stroke="#4ee07a" stroke-width="2.4" stroke-linecap="round"/>
-  <circle cx="21" cy="22.5" r="4.4" fill="none" stroke="#4ee07a" stroke-width="1.4" opacity="0.8"/>
-</svg>`;
-
 export function renderHeader(
   el: HTMLElement,
   s: {
@@ -34,9 +17,8 @@ export function renderHeader(
 
   el.innerHTML = `
     <div class="brand">
-      ${SHIELD}
       <div class="brand-text">
-        <h1>NETZWACHE</h1>
+        <h1>CYBER DOME</h1>
         <div class="sub">Multi-Plattform Lagebild &middot; OSINT Collector</div>
       </div>
     </div>

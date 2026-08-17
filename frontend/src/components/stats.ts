@@ -2,6 +2,13 @@ import { PLATFORM_LABEL, platformIcon } from "../icons";
 import type { Stats } from "../types";
 import { esc, num } from "../utils";
 
+const CATEGORY_SHORT_LABEL: Record<string, string> = {
+  cybersecurity: "cybersec",
+  it: "it",
+  nachrichten: "nachricht",
+  alltag: "alltag",
+};
+
 export function renderStats(el: HTMLElement, s: Stats | null): void {
   if (!s) {
     el.innerHTML = `<div class="empty">Lade Kennzahlen …</div>`;
@@ -60,7 +67,7 @@ export function renderStats(el: HTMLElement, s: Stats | null): void {
         .map(
           ([c, n]) => `
         <div class="bar-row">
-          <span class="cat ${esc(c)}">${esc(c).slice(0, 8)}</span>
+          <span class="cat ${esc(c)}">${esc(CATEGORY_SHORT_LABEL[c] ?? c)}</span>
           <span class="bar"><i style="width:${(n / cMax) * 100}%"></i></span>
           <span class="n">${num(n)}</span>
         </div>`,

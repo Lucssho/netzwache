@@ -14,6 +14,22 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_netzwache.db")
 os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:1/0")  # bewusst tot -> Memory-Fallback
 os.environ.setdefault("TICK_SECONDS", "3600")                # Scheduler stört den Test nicht
 
+# Zugangsdaten für die Tests immer leeren, unabhängig von einer lokalen .env -
+# Tests für den "nicht konfiguriert"-Zustand dürfen nicht von echten Credentials
+# eines Entwicklers abhängen.
+for _cred_var in (
+    "BLUESKY_HANDLE",
+    "BLUESKY_APP_PASSWORD",
+    "REDDIT_CLIENT_ID",
+    "REDDIT_CLIENT_SECRET",
+    "X_BEARER_TOKEN",
+    "NITTER_INSTANCES",
+    "FACEBOOK_PAGE_TOKEN",
+    "FACEBOOK_PAGE_IDS",
+    "RSSBRIDGE_URL",
+):
+    os.environ[_cred_var] = ""
+
 
 @pytest.fixture(scope="session", autouse=True)
 def clean_db_file():
