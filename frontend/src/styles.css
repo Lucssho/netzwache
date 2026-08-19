@@ -36,6 +36,7 @@
   --p-x: #d9dde0;
   --p-facebook: #1877f2;
   --p-news: var(--accent-soft);
+  --p-googlenews: #4285f4;
 
   /* Oberflächen (theme-abhängig, hier: Dark-Werte) */
   --panel-bg: rgba(13, 19, 23, 0.72);
@@ -129,6 +130,7 @@ html[data-theme="light"] {
   --p-x: #33383c;
   --p-facebook: #1360c9;
   --p-news: var(--accent-soft);
+  --p-googlenews: #1a56c4;
 
   --panel-bg: rgba(255, 255, 255, 0.86);
   --sheen: rgba(0, 0, 0, 0.02);
@@ -656,6 +658,7 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 .pbadge.x { color: var(--p-x); }
 .pbadge.facebook { color: var(--p-facebook); }
 .pbadge.news { color: var(--p-news); }
+.pbadge.googlenews { color: var(--p-googlenews); }
 
 /* reine Symbol-Variante ohne Text (z.B. sehr enge Stellen) */
 .picon {
@@ -673,6 +676,7 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 .picon.x { color: var(--p-x); }
 .picon.facebook { color: var(--p-facebook); }
 .picon.news { color: var(--p-news); }
+.picon.googlenews { color: var(--p-googlenews); }
 
 /* ===================== Suchbegriffe ===================== */
 .term-input { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
@@ -760,6 +764,7 @@ a.post-square:hover { text-decoration: none; }
 .post-square.x { border-left-color: var(--p-x); }
 .post-square.facebook { border-left-color: var(--p-facebook); }
 .post-square.news { border-left-color: var(--p-news); }
+.post-square.googlenews { border-left-color: var(--p-googlenews); }
 .post-square .pbadge { align-self: flex-start; }
 .post-square .sq-title {
   font-family: var(--font-ui);
@@ -789,6 +794,7 @@ a.post-square:hover { text-decoration: none; }
 .post.x { border-left-color: var(--p-x); }
 .post.facebook { border-left-color: var(--p-facebook); }
 .post.news { border-left-color: var(--p-news); }
+.post.googlenews { border-left-color: var(--p-googlenews); }
 .post.enter { animation: slidein 0.35s ease-out; }
 @keyframes slidein {
   from { opacity: 0; transform: translateY(-8px); background-color: color-mix(in srgb, var(--accent) 9%, transparent); }
@@ -911,6 +917,7 @@ a.post-square:hover { text-decoration: none; }
 .bar i.x { background: var(--p-x); }
 .bar i.facebook { background: var(--p-facebook); }
 .bar i.news { background: var(--p-news); }
+.bar i.googlenews { background: var(--p-googlenews); }
 .bar-row .n { color: var(--dim); font-size: 0.85rem; min-width: 34px; text-align: right; }
 
 .kw { display: flex; flex-wrap: wrap; gap: 4px; }

@@ -1,6 +1,6 @@
 # NETZWACHE
 
-**Plattformübergreifendes Live-Lagebild aus Bluesky, Reddit, X, Facebook und kuratierten News-Feeds.**
+**Plattformübergreifendes Live-Lagebild aus Bluesky, Reddit, Google News, X, Facebook und kuratierten News-Feeds.**
 Backend in Python (FastAPI), Frontend in TypeScript/Vite, alles per Docker Compose startklar.
 
 ```
@@ -16,7 +16,7 @@ Backend in Python (FastAPI), Frontend in TypeScript/Vite, alles per Docker Compo
 ## Was das Ding macht
 
 * sammelt **alle 10 Sekunden** neue Beiträge (der Takt ist konfigurierbar)
-* **fünf Quellen-Adapter**: Bluesky, Reddit, X/Twitter, Facebook, News-/Security-Feeds
+* **sechs Quellen-Adapter**: Bluesky, Reddit, Google News, X/Twitter, Facebook, News-/Security-Feeds
 * **dedupliziert** über Redis + Unique-Index (kein Beitrag doppelt, auch nicht bei Cross-Posts)
 * **kategorisiert automatisch** in `cybersecurity`, `it`, `nachrichten`, `alltag`
 * erkennt **CVE-Nummern** und berechnet einen **Severity-Score 0–100**
@@ -64,7 +64,7 @@ Dann:
 | API-Doku     | http://localhost:8000/docs   |
 | WebSocket    | ws://localhost:8000/ws       |
 
-**Ohne eine einzige Zeile Konfiguration laufen bereits Bluesky, Reddit und alle News-Feeds.**
+**Ohne eine einzige Zeile Konfiguration laufen bereits Bluesky, Reddit, Google News und alle News-Feeds.**
 X und Facebook bleiben als „inaktiv" markiert, bis du Zugangsdaten hinterlegst (siehe unten).
 
 Stoppen: `docker compose down` · Daten mit löschen: `docker compose down -v`
@@ -116,13 +116,14 @@ Ausgabe pro Quelle: `OK` mit Beispielbeiträgen, `INAKTIV` mit Einrichtungshinwe
 
 ---
 
-## Die fünf Quellen im Detail
+## Die sechs Quellen im Detail
 
 | Quelle | Zugang | Status ohne Konfiguration |
 |--------|--------|---------------------------|
 | **Bluesky** | AT Protocol, `app.bsky.feed.searchPosts` | **läuft sofort** (anonyme öffentliche Suche) |
 | **Reddit** | öffentliche JSON-API, optional OAuth, RSS-Fallback | **läuft sofort** |
 | **News/Security** | 20 kuratierte RSS-Feeds (BSI CERT-Bund, heise, Golem, tagesschau, Krebs, CISA …) | **läuft sofort** |
+| **Google News** | öffentliche RSS-Suche pro Suchbegriff, kein Key | **läuft sofort** |
 | **X / Twitter** | API v2 (Bearer-Token) **oder** Nitter-Mirror | inaktiv – siehe unten |
 | **Facebook** | Graph API (eigene Seiten) **oder** RSS-Bridge | inaktiv – siehe unten |
 

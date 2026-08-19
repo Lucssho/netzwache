@@ -5,7 +5,9 @@ hinzufügen = neue Datei + Eintrag in der Registry (collectors/__init__.py).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -118,6 +120,58 @@ class BaseCollector(ABC):
         if resp.status_code >= 400:
             raise CollectorError(f"HTTP {resp.status_code}: {resp.text[:180]}")
         return resp
+
+    # -- Wiederholung bei Rate-Limits -----------------------------------
+    async def _request_with_backoff(
+        self,
+        method: str,
+        url: str,
+        *,
+        max_retries: int = 2,
+        base_delay: float = 1.5,
+        **kwargs,
+    ) -> httpx.Response:
+        """Wie _get/_post, aber bei HTTP 429 mit Wiederholung statt sofortigem
+        Fehler: respektiert einen Retry-After-Header (Sekunden), sonst
+        exponentielles Backoff mit Jitter (verhindert synchronisierte
+        Wiederholungswellen). Andere Fehler (>=400, != 429) schlagen sofort
+        fehl - dafür gibt Wiederholen keinen Sinn.
+        """
+        headers = {"User-Agent": settings.user_agent, **kwargs.pop("headers", {})}
+        for attempt in range(max_retries + 1):
+            resp = await self.client.request(
+                method, url, headers=headers, timeout=settings.http_timeout, **kwargs
+            )
+            if resp.status_code != 429:
+                if resp.status_code >= 400:
+                    raise CollectorError(f"HTTP {resp.status_code}: {resp.text[:180]}")
+                return resp
+            if attempt == max_retries:
+                raise CollectorError("Rate-Limit erreicht (HTTP 429) - maximale Wiederholungen erschöpft")
+            delay = self._backoff_delay(resp.headers.get("Retry-After"), attempt, base_delay)
+            log.info(
+                "HTTP 429 von %s - warte %.1fs (Versuch %d/%d)",
+                url, delay, attempt + 1, max_retries,
+            )
+            await asyncio.sleep(delay)
+        raise CollectorError("Rate-Limit erreicht (HTTP 429)")  # defensiv, unerreichbar
+
+    async def _get_with_backoff(self, url: str, **kwargs) -> httpx.Response:
+        return await self._request_with_backoff("GET", url, **kwargs)
+
+    async def _post_with_backoff(self, url: str, **kwargs) -> httpx.Response:
+        return await self._request_with_backoff("POST", url, **kwargs)
+
+    @staticmethod
+    def _backoff_delay(retry_after: str | None, attempt: int, base_delay: float) -> float:
+        if retry_after:
+            try:
+                delay = float(retry_after)
+            except ValueError:
+                delay = base_delay * (2**attempt)
+        else:
+            delay = base_delay * (2**attempt)
+        return delay + random.uniform(0, delay * 0.25)
 
     @staticmethod
     def _now() -> datetime:

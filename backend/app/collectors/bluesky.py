@@ -34,6 +34,7 @@ class BlueskyCollector(BaseCollector):
         super().__init__(client)
         self._jwt: str | None = None
         self._jwt_at: datetime | None = None
+        self._session_fail_at: datetime | None = None
 
     def available(self) -> tuple[bool, str]:
         if settings.bluesky_handle and settings.bluesky_app_password:
@@ -42,7 +43,13 @@ class BlueskyCollector(BaseCollector):
 
     # ------------------------------------------------------------------
     async def _ensure_session(self) -> str | None:
-        """Holt/erneuert ein AT-Protocol Access-JWT, falls Credentials da sind."""
+        """Holt/erneuert ein AT-Protocol Access-JWT, falls Credentials da sind.
+
+        Gibt None zurück (anonymer Fallback), wenn keine Credentials gesetzt
+        sind ODER der letzte Login-Versuch kürzlich fehlgeschlagen ist - sonst
+        würde ein anhaltendes Rate-Limit bei jedem einzelnen Suchbegriff im
+        selben Lauf erneut den Login-Endpunkt treffen (siehe fetch()).
+        """
         if not (settings.bluesky_handle and settings.bluesky_app_password):
             return None
         fresh = (
@@ -52,16 +59,27 @@ class BlueskyCollector(BaseCollector):
         )
         if fresh:
             return self._jwt
-        resp = await self._post(
-            f"{settings.bluesky_pds}/xrpc/com.atproto.server.createSession",
-            json={
-                "identifier": settings.bluesky_handle,
-                "password": settings.bluesky_app_password,
-            },
-        )
+        if (
+            self._session_fail_at
+            and (datetime.now(timezone.utc) - self._session_fail_at).total_seconds() < 120
+        ):
+            return None
+        try:
+            resp = await self._post_with_backoff(
+                f"{settings.bluesky_pds}/xrpc/com.atproto.server.createSession",
+                json={
+                    "identifier": settings.bluesky_handle,
+                    "password": settings.bluesky_app_password,
+                },
+            )
+        except CollectorError as exc:
+            self._session_fail_at = datetime.now(timezone.utc)
+            log.warning("Bluesky-Login fehlgeschlagen, nutze anonyme Suche als Fallback: %s", exc)
+            return None
         data = resp.json()
         self._jwt = data.get("accessJwt")
         self._jwt_at = datetime.now(timezone.utc)
+        self._session_fail_at = None
         log.info("Bluesky-Session erneuert für %s", settings.bluesky_handle)
         return self._jwt
 
@@ -69,13 +87,13 @@ class BlueskyCollector(BaseCollector):
         jwt = await self._ensure_session()
         params = {"q": term, "limit": limit, "sort": "latest"}
         if jwt:
-            resp = await self._get(
+            resp = await self._get_with_backoff(
                 f"{settings.bluesky_pds}/xrpc/app.bsky.feed.searchPosts",
                 params=params,
                 headers={"Authorization": f"Bearer {jwt}"},
             )
         else:
-            resp = await self._get(
+            resp = await self._get_with_backoff(
                 f"{settings.bluesky_public_api}/xrpc/app.bsky.feed.searchPosts",
                 params=params,
             )
@@ -85,6 +103,9 @@ class BlueskyCollector(BaseCollector):
     async def fetch(self, terms: list[str]) -> list[RawItem]:
         if not terms:
             return []
+        # Wie bei Reddit pro Lauf begrenzen - sonst multipliziert ein
+        # anhaltendes Rate-Limit die Anfragen mit jedem weiteren Suchbegriff.
+        terms = terms[:8]
         per_term = max(5, min(25, settings.max_items_per_run // max(1, len(terms)) + 5))
         items: list[RawItem] = []
         errors: list[str] = []

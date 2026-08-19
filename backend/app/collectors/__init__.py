@@ -11,6 +11,7 @@ from __future__ import annotations
 from .base import BaseCollector, CollectorError, RawItem
 from .bluesky import BlueskyCollector
 from .facebook import FacebookCollector
+from .googlenews import GoogleNewsCollector
 from .news import NewsCollector
 from .reddit import RedditCollector
 from .x_twitter import XCollector
@@ -21,6 +22,7 @@ COLLECTOR_CLASSES: list[type[BaseCollector]] = [
     XCollector,
     FacebookCollector,
     NewsCollector,
+    GoogleNewsCollector,
 ]
 
 __all__ = [
@@ -33,4 +35,5 @@ __all__ = [
     "XCollector",
     "FacebookCollector",
     "NewsCollector",
+    "GoogleNewsCollector",
 ]

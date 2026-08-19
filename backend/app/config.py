@@ -31,11 +31,12 @@ class Settings(BaseSettings):
     retention_days: int = 30        # Posts älter als X Tage werden aufgeräumt
 
     # --- Intervalle je Quelle (Sekunden, respektiert Rate-Limits) -------
-    interval_bluesky: int = 10
-    interval_reddit: int = 30
+    interval_bluesky: int = 300
+    interval_reddit: int = 120
     interval_x: int = 60
     interval_facebook: int = 300
     interval_news: int = 120
+    interval_googlenews: int = 60
 
     # --- Bluesky (AT Protocol) ------------------------------------------
     # Öffentliche Suche funktioniert meist ohne Login. Für stabile Limits:
@@ -68,6 +69,9 @@ class Settings(BaseSettings):
 
     # --- News/RSS ---------------------------------------------------------
     news_keep_all: bool = True      # kuratierte Feeds auch ohne Term-Treffer behalten
+
+    # --- Google News --------------------------------------------------------
+    # Öffentliche RSS-Suche, kein Key nötig. Läuft pro aktivem Suchbegriff.
 
     @property
     def cors_list(self) -> list[str]:

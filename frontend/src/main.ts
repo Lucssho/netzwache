@@ -38,6 +38,7 @@ const state = {
   feedVariant: "list" as FeedVariant,
   resurfacedPostId: null as number | null,
   resurfaceTimer: null as number | null,
+  stallStreak: {} as Record<string, number>,
   filters: {
     platform: "all",
     category: "all",
@@ -195,6 +196,7 @@ const PLATFORMS = [
   ["all", "alle"],
   ["bluesky", "Bluesky"],
   ["reddit", "Reddit"],
+  ["googlenews", "Google News"],
   ["x", "X"],
   ["facebook", "Facebook"],
   ["news", "News"],
@@ -277,16 +279,34 @@ function paintFeed(): void {
 }
 
 // ------------------------------------------------------- Rate-Limit-Fallback
-// Wenn eine aktive Quelle gerade rate-limitiert ist (HTTP 429 / "Rate-Limit"
-// in der Statusmeldung) und keine neuen Beiträge reinkommen, wird alle 10s
-// ein zufälliger, bereits geladener Beitrag von weiter unten im (gefilterten)
-// Feed wieder nach oben geholt. Der echte Zeitstempel bleibt dabei erhalten -
-// es wird nichts als "neu" vorgetäuscht. Sobald echte neue Beiträge kommen,
-// verdrängen die sofort den wiederhochgeholten Beitrag.
+// Wenn eine aktive Quelle gerade klemmt (harter Fehlerstatus ODER mehrere
+// Läufe in Folge ohne einen einzigen neuen Beitrag - z.B. weil Reddit/Bluesky
+// Anfragen stillschweigend mit 0 Treffern statt einem Fehler beantworten),
+// wird alle 10s ein zufälliger, bereits geladener Beitrag von weiter unten im
+// (gefilterten) Feed wieder nach oben geholt. Der echte Zeitstempel bleibt
+// dabei erhalten - es wird nichts als "neu" vorgetäuscht. Sobald echte neue
+// Beiträge kommen, verdrängen die sofort den wiederhochgeholten Beitrag.
+//
+// Hinweis: früher wurde hier nur der `detail`-Text auf "429"/"rate limit"
+// geprüft - das griff aber nicht, weil (a) ein Backend-Block auch als 403
+// oder als generischer CollectorError ankommen kann und (b) `detail` bei
+// einem erfolgreichen, aber leeren Lauf (status "ok", items_last_run 0)
+// gar nicht aktualisiert wird. Daher jetzt zusätzlich ein clientseitiger
+// "leer Streak" pro Quelle.
 function isRateLimited(): boolean {
-  return state.sources.some(
-    (s) => s.enabled && s.status !== "disabled" && /429|rate.?limit/i.test(s.detail || ""),
-  );
+  let stalled = false;
+  for (const s of state.sources) {
+    if (!s.enabled || s.status === "disabled") continue;
+    if (s.status === "error" || s.consecutive_errors > 0) {
+      state.stallStreak[s.name] = 0;
+      stalled = true;
+      continue;
+    }
+    const streak = s.items_last_run > 0 ? 0 : (state.stallStreak[s.name] ?? 0) + 1;
+    state.stallStreak[s.name] = streak;
+    if (streak >= 2) stalled = true;
+  }
+  return stalled;
 }
 
 function resurfaceOnce(): void {

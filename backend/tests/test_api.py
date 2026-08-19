@@ -10,14 +10,14 @@ async def test_full_api_flow(app_client: httpx.AsyncClient):
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
 
-    # Meta: alle fünf Collector registriert
+    # Meta: alle sechs Collector registriert
     meta = (await app_client.get("/api/meta")).json()
     names = {c["name"] for c in meta["collectors"]}
-    assert names == {"bluesky", "reddit", "x", "facebook", "news"}
+    assert names == {"bluesky", "reddit", "googlenews", "x", "facebook", "news"}
 
     # Quellen-Status wurde angelegt
     sources = (await app_client.get("/api/sources")).json()
-    assert len(sources) == 5
+    assert len(sources) == 6
     assert {s["name"] for s in sources} == names
 
     # Seed-Suchbegriffe vorhanden

@@ -76,19 +76,19 @@ class RedditCollector(BaseCollector):
         token = await self._ensure_token()
         if token:
             self._mode = "oauth"
-            resp = await self._get(
+            resp = await self._get_with_backoff(
                 f"{OAUTH}{path}",
                 params=params,
                 headers={"Authorization": f"Bearer {token}"},
             )
         else:
             self._mode = "public"
-            resp = await self._get(f"{PUBLIC}{path}.json", params={**params, "raw_json": 1})
+            resp = await self._get_with_backoff(f"{PUBLIC}{path}.json", params={**params, "raw_json": 1})
         data = resp.json()
         return [c.get("data", {}) for c in data.get("data", {}).get("children", [])]
 
     async def _rss_fallback(self, term: str) -> list[RawItem]:
-        resp = await self._get(f"{PUBLIC}/search.rss", params={"q": term, "sort": "new"})
+        resp = await self._get_with_backoff(f"{PUBLIC}/search.rss", params={"q": term, "sort": "new"})
         feed = feedparser.parse(resp.text)
         out: list[RawItem] = []
         for e in feed.entries[:20]:

@@ -53,6 +53,14 @@ const news: IconFn = (size = 14) =>
      <path d="M7 11.4a6 6 0 0 1 6 6M7 7a10.4 10.4 0 0 1 10.4 10.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/>`,
   );
 
+/** Google News - vereinfachtes "G"-Zeichen (offener Ring + Quersteg). */
+const googlenews: IconFn = (size = 14) =>
+  wrap(
+    size,
+    `<path d="M15 5.5a7 7 0 1 0 0 13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/>
+     <path d="M15 12h-3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/>`,
+  );
+
 /** Generischer Platzhalter für unbekannte/zukünftige Plattformen. */
 const generic: IconFn = (size = 14) =>
   wrap(
@@ -61,7 +69,7 @@ const generic: IconFn = (size = 14) =>
      <path d="M12 8v5l3 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`,
   );
 
-const ICONS: Record<string, IconFn> = { x, bluesky, reddit, facebook, news };
+const ICONS: Record<string, IconFn> = { x, bluesky, reddit, facebook, news, googlenews };
 
 export function platformIcon(platform: string, size = 14): string {
   const fn = ICONS[platform] ?? generic;
@@ -74,4 +82,5 @@ export const PLATFORM_LABEL: Record<string, string> = {
   reddit: "Reddit",
   facebook: "Facebook",
   news: "News",
+  googlenews: "Google News",
 };

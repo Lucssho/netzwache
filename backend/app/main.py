@@ -30,7 +30,7 @@ BANNER = r"""
 |  \| |  _|   | |   / /  \ \ /\ / / _` | | | |   | |_| |  _|
 | |\  | |___  | |  / /_   \ V  V / (_| | | | |___|  _  | |___
 |_| \_|_____| |_| /____|   \_/\_/ \__,_|_|  \____|_| |_|_____|
-   Open-Source Lagebild:  Bluesky · Reddit · X · Facebook · News
+   Open-Source Lagebild:  Bluesky · Reddit · Google News · X · Facebook · News
 """
 
 
