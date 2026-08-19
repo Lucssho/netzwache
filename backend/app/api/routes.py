@@ -23,7 +23,7 @@ DEFAULT_UI_SETTINGS: dict[str, str] = {
     "font_family": "jetbrains",   # jetbrains | fira | sfmono | menlo | inter | system
     "font_size": "13",            # px, 11..18
     "density": "comfortable",     # compact | comfortable | relaxed
-    "theme": "macos-linux",       # macos-linux | terminal
+    "theme": "dark",               # dark | light
 }
 
 

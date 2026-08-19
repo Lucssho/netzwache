@@ -1,6 +1,6 @@
 import { PLATFORM_LABEL, platformIcon } from "../icons";
 import type { Post } from "../types";
-import { esc, highlight, num, relTime, severityClass } from "../utils";
+import { esc, highlight, num, relTime } from "../utils";
 
 function engagementText(e: Record<string, number>): string {
   const parts: string[] = [];
@@ -16,7 +16,6 @@ function engagementText(e: Record<string, number>): string {
 export function postCard(p: Post, isNew = false): string {
   const platform = PLATFORM_LABEL[p.platform] ?? p.platform;
   const body = highlight(esc(p.text || ""), p.matched_terms);
-  const sev = severityClass(p.severity);
 
   return `
   <article class="post ${esc(p.platform)} ${isNew ? "enter" : ""}" data-id="${p.id}">
@@ -40,13 +39,6 @@ export function postCard(p: Post, isNew = false): string {
         .slice(0, 4)
         .map((c) => `<span class="cve">${esc(c)}</span>`)
         .join("")}
-      ${
-        p.severity > 0
-          ? `<span class="sev" title="Relevanz/Severity ${p.severity}/100">SEV
-               <span class="sev-bar"><i class="${sev}" style="width:${p.severity}%"></i></span>
-               ${p.severity}</span>`
-          : ""
-      }
       ${
         p.matched_terms?.length
           ? `<span class="eng">match: ${p.matched_terms.slice(0, 3).map(esc).join(", ")}</span>`

@@ -2,9 +2,9 @@ import "./styles.css";
 
 import { api } from "./api";
 import { renderDiagnosticsPanel } from "./components/diagnosticsPanel";
-import { attachExpand, postCard, renderFeed, squareCard, type FeedVariant } from "./components/feed";
+import { attachExpand, postCard, renderFeed, type FeedVariant } from "./components/feed";
 import { renderHeader } from "./components/header";
-import { applySettings, renderSettingsPanel } from "./components/settingsPanel";
+import { applySettings } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
 import { renderTerms } from "./components/terms";
@@ -19,7 +19,7 @@ const DEFAULT_SETTINGS: UiSettings = {
   font_family: "jetbrains",
   font_size: "13",
   density: "comfortable",
-  theme: "macos-linux",
+  theme: "dark",
 };
 
 const state = {
@@ -36,6 +36,8 @@ const state = {
   leftColOpen: true,
   lagebildOpen: true,
   feedVariant: "list" as FeedVariant,
+  resurfacedPostId: null as number | null,
+  resurfaceTimer: null as number | null,
   filters: {
     platform: "all",
     category: "all",
@@ -68,10 +70,15 @@ app.innerHTML = `
     <button id="btn-pause" class="btn-ghost" title="Live-Stream anhalten (Leertaste)">⏸ Pause</button>
     <button id="btn-collect" class="btn-go" title="Alle Quellen sofort abfragen">▶ Jetzt sammeln</button>
 
-    <div class="popover-anchor">
-      <button id="btn-display" class="icon-btn" title="Darstellung: Schriftart, Größe, Dichte">Aa</button>
-      <div class="popover" id="pop-display" style="display:none"></div>
-    </div>
+    <button id="btn-theme" class="icon-btn" title="Design umschalten">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" data-icon="moon">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" fill="currentColor"/>
+      </svg>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" data-icon="sun" style="display:none">
+        <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
+        <path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
     <div class="popover-anchor">
       <button id="btn-diag" class="icon-btn" title="Diagnose">⚕</button>
       <div class="popover wide" id="pop-diag" style="display:none"></div>
@@ -85,8 +92,8 @@ app.innerHTML = `
           <span class="panel-title" id="left-outer-title">Suchraum</span>
           <button id="btn-leftcol-toggle" class="icon-btn collapse-toggle" title="Suchraum ein-/ausblenden">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M8.5 3.5 4.5 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 3.5 8 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7 3.5 3.5 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M10.5 3.5 7 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
         </div>
@@ -106,7 +113,7 @@ app.innerHTML = `
               <span class="panel-title">Quellen</span>
               <button id="btn-sources-toggle" class="icon-btn lg chevron open" title="Quellen ein-/ausblenden">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <path d="M3 4.5 6 8l3-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M3 4 6 8l3-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </button>
             </div>
@@ -140,8 +147,8 @@ app.innerHTML = `
           <span class="panel-title" id="lagebild-title">Lagebild</span>
           <button id="btn-lagebild-toggle" class="icon-btn collapse-toggle flip" title="Lagebild ein-/ausblenden">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M8.5 3.5 4.5 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 3.5 8 7l4 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7 3.5 3.5 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M10.5 3.5 7 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
         </div>
@@ -162,8 +169,7 @@ const els = {
   search: $<HTMLInputElement>("search"),
   btnPause: $<HTMLButtonElement>("btn-pause"),
   btnCollect: $<HTMLButtonElement>("btn-collect"),
-  btnDisplay: $<HTMLButtonElement>("btn-display"),
-  popDisplay: $("pop-display"),
+  btnTheme: $<HTMLButtonElement>("btn-theme"),
   btnDiag: $<HTMLButtonElement>("btn-diag"),
   popDiag: $("pop-diag"),
   sources: $("sources"),
@@ -255,9 +261,56 @@ function filterLabel(): string {
 
 // ---------------------------------------------------------------- Render
 function paintFeed(): void {
-  const visible = state.posts.filter(matchesFilter).slice(0, 200);
+  let visible = state.posts.filter(matchesFilter);
+  if (state.resurfacedPostId != null) {
+    const idx = visible.findIndex((p) => p.id === state.resurfacedPostId);
+    if (idx > 0) {
+      const [pinned] = visible.splice(idx, 1);
+      visible = [pinned, ...visible];
+    } else if (idx === -1) {
+      state.resurfacedPostId = null;
+    }
+  }
+  visible = visible.slice(0, 200);
   renderFeed(els.feed, visible, hasActiveFilter(), state.feedVariant);
   els.feedInfo.textContent = `${visible.length} sichtbar / ${state.posts.length} im Puffer`;
+}
+
+// ------------------------------------------------------- Rate-Limit-Fallback
+// Wenn eine aktive Quelle gerade rate-limitiert ist (HTTP 429 / "Rate-Limit"
+// in der Statusmeldung) und keine neuen Beiträge reinkommen, wird alle 10s
+// ein zufälliger, bereits geladener Beitrag von weiter unten im (gefilterten)
+// Feed wieder nach oben geholt. Der echte Zeitstempel bleibt dabei erhalten -
+// es wird nichts als "neu" vorgetäuscht. Sobald echte neue Beiträge kommen,
+// verdrängen die sofort den wiederhochgeholten Beitrag.
+function isRateLimited(): boolean {
+  return state.sources.some(
+    (s) => s.enabled && s.status !== "disabled" && /429|rate.?limit/i.test(s.detail || ""),
+  );
+}
+
+function resurfaceOnce(): void {
+  if (state.filters.paused) return;
+  const visible = state.posts.filter(matchesFilter);
+  if (visible.length < 4) return;
+  const pool = visible.slice(3).filter((p) => p.id !== state.resurfacedPostId);
+  if (!pool.length) return;
+  state.resurfacedPostId = pool[Math.floor(Math.random() * pool.length)].id;
+  paintFeed();
+}
+
+function updateResurfacing(): void {
+  const active = isRateLimited();
+  if (active && state.resurfaceTimer == null) {
+    state.resurfaceTimer = window.setInterval(resurfaceOnce, 10_000);
+  } else if (!active && state.resurfaceTimer != null) {
+    window.clearInterval(state.resurfaceTimer);
+    state.resurfaceTimer = null;
+    if (state.resurfacedPostId != null) {
+      state.resurfacedPostId = null;
+      paintFeed();
+    }
+  }
 }
 
 function paintHeader(): void {
@@ -295,6 +348,7 @@ function paintSources(): void {
       paintSources();
     },
   );
+  updateResurfacing();
 }
 
 function setTermStatus(text: string, kind: "busy" | "done" | "error" = "done"): void {
@@ -360,15 +414,22 @@ function toast(message: string, isError = false): void {
 }
 
 // ------------------------------------------------------------ Darstellung
-function paintDisplayPanel(): void {
-  renderSettingsPanel(els.popDisplay, state.settings, async (patch) => {
-    state.settings = { ...state.settings, ...patch };
-    try {
-      state.settings = await api.putSettings(patch);
-    } catch (e) {
-      toast(`Einstellung nicht gespeichert: ${e}`, true);
-    }
-  });
+function paintThemeIcon(): void {
+  const isLight = state.settings.theme === "light";
+  els.btnTheme.querySelector<SVGElement>('[data-icon="moon"]')!.style.display = isLight ? "none" : "block";
+  els.btnTheme.querySelector<SVGElement>('[data-icon="sun"]')!.style.display = isLight ? "block" : "none";
+}
+
+async function toggleTheme(): Promise<void> {
+  const theme = state.settings.theme === "light" ? "dark" : "light";
+  state.settings = { ...state.settings, theme };
+  applySettings(state.settings);
+  paintThemeIcon();
+  try {
+    state.settings = await api.putSettings({ theme });
+  } catch (e) {
+    toast(`Einstellung nicht gespeichert: ${e}`, true);
+  }
 }
 
 function paintDiagPanel(): void {
@@ -376,23 +437,11 @@ function paintDiagPanel(): void {
 }
 
 function closePopovers(except?: HTMLElement): void {
-  for (const p of [els.popDisplay, els.popDiag]) {
-    if (p !== except) p.style.display = "none";
-  }
-  els.btnDisplay.classList.toggle("active", els.popDisplay.style.display !== "none");
+  if (els.popDiag !== except) els.popDiag.style.display = "none";
   els.btnDiag.classList.toggle("active", els.popDiag.style.display !== "none");
 }
 
-els.btnDisplay.addEventListener("click", (ev) => {
-  ev.stopPropagation();
-  const opening = els.popDisplay.style.display === "none";
-  closePopovers();
-  if (opening) {
-    els.popDisplay.style.display = "block";
-    els.btnDisplay.classList.add("active");
-    paintDisplayPanel();
-  }
-});
+els.btnTheme.addEventListener("click", () => void toggleTheme());
 
 els.btnDiag.addEventListener("click", (ev) => {
   ev.stopPropagation();
@@ -414,7 +463,7 @@ els.btnDiag.addEventListener("click", (ev) => {
 
 document.addEventListener("click", (ev) => {
   const t = ev.target as Node;
-  if (!els.popDisplay.contains(t) && !els.popDiag.contains(t)) closePopovers();
+  if (!els.popDiag.contains(t)) closePopovers();
 });
 
 // ------------------------------------------------------------ Datenfluss
@@ -447,6 +496,12 @@ function prependPosts(incoming: Post[]): void {
   const visible = fresh.filter(matchesFilter);
   if (!visible.length) {
     els.feedInfo.textContent = `${els.feed.children.length} sichtbar / ${state.posts.length} im Puffer`;
+    return;
+  }
+  if (state.resurfacedPostId != null) {
+    // Echte neue Beiträge verdrängen sofort den wiederhochgeholten Beitrag.
+    state.resurfacedPostId = null;
+    paintFeed();
     return;
   }
   if (state.feedVariant === "grid") {
@@ -577,7 +632,7 @@ const stream = new LiveStream((event, data) => {
       // Änderung auf einem anderen Gerät -> hier ebenfalls übernehmen
       state.settings = data as UiSettings;
       applySettings(state.settings);
-      if (els.popDisplay.style.display !== "none") paintDisplayPanel();
+      paintThemeIcon();
       break;
     case "tick":
       state.nextTick = state.tickSeconds;
@@ -608,6 +663,7 @@ async function boot(): Promise<void> {
   state.terms = terms;
   state.settings = settings;
   applySettings(state.settings);
+  paintThemeIcon();
   paintSources();
   paintTerms();
 

@@ -25,8 +25,7 @@ export function renderStats(el: HTMLElement, s: Stats | null): void {
     <div class="kpis">
       <div class="kpi"><div class="k">Letzte Stunde</div><div class="v">${num(s.last_hour)}</div></div>
       <div class="kpi"><div class="k">Letzte 5 min</div><div class="v">${num(s.last_5min)}</div></div>
-      <div class="kpi"><div class="k">Pro Minute</div><div class="v small">${s.per_minute.toFixed(2)}</div></div>
-      <div class="kpi"><div class="k">Hohe Severity</div><div class="v small ${s.high_severity ? "red" : ""}">${num(s.high_severity)}</div></div>
+      <div class="kpi wide"><div class="k">Pro Minute</div><div class="v small">${s.per_minute.toFixed(2)}</div></div>
     </div>
 
     <div style="margin-top:12px">

@@ -47,9 +47,3 @@ export function highlight(escaped: string, terms: string[]): string {
   if (!safe.length) return escaped;
   return escaped.replace(new RegExp(`(${safe.join("|")})`, "gi"), "<mark>$1</mark>");
 }
-
-export function severityClass(v: number): string {
-  if (v >= 60) return "high";
-  if (v >= 30) return "mid";
-  return "";
-}

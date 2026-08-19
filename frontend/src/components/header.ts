@@ -49,8 +49,8 @@ export function renderHeader(
       </div>
       <div class="tick-ring" title="Nächster Sammellauf">
         <svg width="46" height="46">
-          <circle cx="23" cy="23" r="18" stroke="#1b2830" stroke-width="3" fill="none"/>
-          <circle cx="23" cy="23" r="18" stroke="#ff6a1a" stroke-width="3" fill="none"
+          <circle cx="23" cy="23" r="18" style="stroke:var(--line)" stroke-width="3" fill="none"/>
+          <circle cx="23" cy="23" r="18" style="stroke:var(--accent)" stroke-width="3" fill="none"
                   stroke-linecap="round"
                   stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct)}"/>
         </svg>
