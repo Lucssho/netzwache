@@ -1,7 +1,6 @@
 import "./styles.css";
 
 import { api } from "./api";
-import { renderDiagnosticsPanel } from "./components/diagnosticsPanel";
 import { attachExpand, postCard, renderFeed, type FeedVariant } from "./components/feed";
 import { renderHeader } from "./components/header";
 import { applySettings } from "./components/settingsPanel";
@@ -9,7 +8,7 @@ import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
 import { renderTerms } from "./components/terms";
 import { platformIcon } from "./icons";
-import type { Diagnostics, Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
+import type { Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
 import { esc } from "./utils";
 import { LiveStream } from "./ws";
 
@@ -31,13 +30,12 @@ const state = {
   tickSeconds: 10,
   nextTick: 10,
   settings: { ...DEFAULT_SETTINGS } as UiSettings,
-  diagnostics: null as Diagnostics | null,
-  sourcesOpen: true,
+  sourcesOpen: false,
   leftColOpen: true,
   lagebildOpen: true,
   feedVariant: "list" as FeedVariant,
   resurfacedPostId: null as number | null,
-  resurfaceTimer: null as number | null,
+  resurfaceActive: false,
   stallStreak: {} as Record<string, number>,
   filters: {
     platform: "all",
@@ -45,6 +43,7 @@ const state = {
     query: "",
     minSeverity: 0,
     paused: false,
+    focusTerm: null,
   } as Filters,
 };
 
@@ -80,10 +79,6 @@ app.innerHTML = `
         <path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
     </button>
-    <div class="popover-anchor">
-      <button id="btn-diag" class="icon-btn" title="Diagnose">⚕</button>
-      <div class="popover wide" id="pop-diag" style="display:none"></div>
-    </div>
   </div>
 
   <div class="main" id="main-grid">
@@ -112,13 +107,13 @@ app.innerHTML = `
           <section class="panel" style="flex:1 1 auto">
             <div class="panel-head">
               <span class="panel-title">Quellen</span>
-              <button id="btn-sources-toggle" class="icon-btn lg chevron open" title="Quellen ein-/ausblenden">
+              <button id="btn-sources-toggle" class="icon-btn lg chevron" title="Quellen ein-/ausblenden">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                   <path d="M3 4 6 8l3-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </button>
             </div>
-            <div class="panel-body tight" id="sources"></div>
+            <div class="panel-body tight collapsed" id="sources"></div>
           </section>
         </div>
       </div>
@@ -135,6 +130,10 @@ app.innerHTML = `
               <button type="button" data-v="grid" title="Kacheln">▦</button>
             </div>
           </div>
+        </div>
+        <div class="focus-bar" id="focus-bar" style="display:none">
+          <span class="focus-bar-label">Fokus auf <b id="focus-bar-term"></b><span id="focus-bar-count"></span></span>
+          <button type="button" id="focus-bar-clear" title="Fokus aufheben (Esc)">Fokus aufheben ✕</button>
         </div>
         <div class="panel-body tight" id="feed-scroll">
           <div class="feed" id="feed"></div>
@@ -171,8 +170,6 @@ const els = {
   btnPause: $<HTMLButtonElement>("btn-pause"),
   btnCollect: $<HTMLButtonElement>("btn-collect"),
   btnTheme: $<HTMLButtonElement>("btn-theme"),
-  btnDiag: $<HTMLButtonElement>("btn-diag"),
-  popDiag: $("pop-diag"),
   sources: $("sources"),
   btnSourcesToggle: $<HTMLButtonElement>("btn-sources-toggle"),
   mainGrid: $("main-grid"),
@@ -187,6 +184,10 @@ const els = {
   feedScroll: $("feed-scroll"),
   feedInfo: $("feed-info"),
   feedVariantToggle: $("feed-variant-toggle"),
+  focusBar: $("focus-bar"),
+  focusBarTerm: $("focus-bar-term"),
+  focusBarCount: $("focus-bar-count"),
+  focusBarClear: $<HTMLButtonElement>("focus-bar-clear"),
   stats: $("stats"),
   toasts: $("toasts"),
 };
@@ -242,6 +243,7 @@ function matchesFilter(p: Post): boolean {
   if (f.platform !== "all" && p.platform !== f.platform) return false;
   if (f.category !== "all" && !(p.categories || []).includes(f.category)) return false;
   if (f.minSeverity && p.severity < f.minSeverity) return false;
+  if (f.focusTerm && !(p.matched_terms || []).includes(f.focusTerm)) return false;
   if (f.query) {
     const q = f.query.toLowerCase();
     if (!`${p.title} ${p.text} ${p.author} ${p.source}`.toLowerCase().includes(q)) return false;
@@ -251,14 +253,28 @@ function matchesFilter(p: Post): boolean {
 
 function hasActiveFilter(): boolean {
   const f = state.filters;
-  return f.platform !== "all" || f.category !== "all" || !!f.query || f.minSeverity > 0;
+  return f.platform !== "all" || f.category !== "all" || !!f.query || f.minSeverity > 0 || !!f.focusTerm;
 }
 
 function filterLabel(): string {
   const f = state.filters;
   const parts = [f.platform, f.category].filter((x) => x !== "all");
+  if (f.focusTerm) parts.push(`#${f.focusTerm}`);
   if (f.query) parts.push(`"${f.query}"`);
   return parts.length ? parts.join(",") : "alle";
+}
+
+// -------------------------------------------------------------- Fokus-Modus
+// Ein Klick auf einen Suchbegriff-Chip "zoomt" in dessen Treffer hinein:
+// Feed, Quellen und Tag-Liste blenden alles aus, was nicht zu diesem einen
+// Begriff gehört. Erneutes Klicken auf denselben Chip (oder das X in der
+// Fokus-Leiste) hebt den Fokus wieder auf.
+function setFocusTerm(term: string | null): void {
+  state.filters.focusTerm = state.filters.focusTerm === term ? null : term;
+  paintFeed();
+  paintSources();
+  paintTerms();
+  paintHeader();
 }
 
 // ---------------------------------------------------------------- Render
@@ -276,6 +292,13 @@ function paintFeed(): void {
   visible = visible.slice(0, 200);
   renderFeed(els.feed, visible, hasActiveFilter(), state.feedVariant);
   els.feedInfo.textContent = `${visible.length} sichtbar / ${state.posts.length} im Puffer`;
+
+  const focus = state.filters.focusTerm;
+  els.focusBar.style.display = focus ? "flex" : "none";
+  if (focus) {
+    els.focusBarTerm.textContent = `"${focus}"`;
+    els.focusBarCount.textContent = ` · ${visible.length} Treffer`;
+  }
 }
 
 // ------------------------------------------------------- Rate-Limit-Fallback
@@ -320,17 +343,19 @@ function resurfaceOnce(): void {
 }
 
 function updateResurfacing(): void {
-  const active = isRateLimited();
-  if (active && state.resurfaceTimer == null) {
-    state.resurfaceTimer = window.setInterval(resurfaceOnce, 10_000);
-  } else if (!active && state.resurfaceTimer != null) {
-    window.clearInterval(state.resurfaceTimer);
-    state.resurfaceTimer = null;
-    if (state.resurfacedPostId != null) {
-      state.resurfacedPostId = null;
-      paintFeed();
-    }
+  state.resurfaceActive = isRateLimited();
+  if (!state.resurfaceActive && state.resurfacedPostId != null) {
+    state.resurfacedPostId = null;
+    paintFeed();
   }
+}
+
+// Wird bei jedem Takt-Ende aufgerufen (lokal oder per Server-"tick"-Event) -
+// damit der Wechsel des wiederhochgeholten Beitrags exakt mit dem sichtbaren
+// 10s-Countdown oben rechts zusammenfällt, statt auf einem eigenen,
+// unabhängig laufenden (und irgendwann davondriftenden) Intervall zu hängen.
+function onTickBoundary(): void {
+  if (state.resurfaceActive) resurfaceOnce();
 }
 
 function paintHeader(): void {
@@ -346,9 +371,18 @@ function paintHeader(): void {
 }
 
 function paintSources(): void {
+  const focus = state.filters.focusTerm;
+  const activePlatforms = focus
+    ? new Set(
+        state.posts
+          .filter((p) => (p.matched_terms || []).includes(focus))
+          .map((p) => p.platform),
+      )
+    : null;
   renderSources(
     els.sources,
     state.sources,
+    activePlatforms,
     async (name, enabled) => {
       await api.patchSource(name, { enabled });
       toast(`${name}: ${enabled ? "aktiviert" : "deaktiviert"}`);
@@ -411,8 +445,10 @@ function paintTerms(freshId?: number): void {
         }
       },
       onDelete: async (id) => {
+        const deleted = state.terms.find((t) => t.id === id);
         await api.deleteTerm(id);
         state.terms = await api.terms();
+        if (deleted && state.filters.focusTerm === deleted.term) setFocusTerm(null);
         paintTerms();
       },
       onToggle: async (id, enabled) => {
@@ -420,7 +456,9 @@ function paintTerms(freshId?: number): void {
         state.terms = await api.terms();
         paintTerms();
       },
+      onFocus: (term) => setFocusTerm(term),
     },
+    state.filters.focusTerm,
     freshId,
   );
 }
@@ -452,39 +490,9 @@ async function toggleTheme(): Promise<void> {
   }
 }
 
-function paintDiagPanel(): void {
-  renderDiagnosticsPanel(els.popDiag, state.diagnostics);
-}
-
-function closePopovers(except?: HTMLElement): void {
-  if (els.popDiag !== except) els.popDiag.style.display = "none";
-  els.btnDiag.classList.toggle("active", els.popDiag.style.display !== "none");
-}
-
 els.btnTheme.addEventListener("click", () => void toggleTheme());
 
-els.btnDiag.addEventListener("click", (ev) => {
-  ev.stopPropagation();
-  const opening = els.popDiag.style.display === "none";
-  closePopovers();
-  if (opening) {
-    els.popDiag.style.display = "block";
-    els.btnDiag.classList.add("active");
-    paintDiagPanel();
-    void api
-      .diagnostics()
-      .then((d) => {
-        state.diagnostics = d;
-        paintDiagPanel();
-      })
-      .catch((e) => toast(String(e), true));
-  }
-});
-
-document.addEventListener("click", (ev) => {
-  const t = ev.target as Node;
-  if (!els.popDiag.contains(t)) closePopovers();
-});
+els.focusBarClear.addEventListener("click", () => setFocusTerm(null));
 
 // ------------------------------------------------------------ Datenfluss
 async function reloadPosts(): Promise<void> {
@@ -623,7 +631,9 @@ document.addEventListener("keydown", (ev) => {
     ev.preventDefault();
     els.search.focus();
   }
-  if (ev.key === "Escape") closePopovers();
+  if (ev.key === "Escape" && state.filters.focusTerm) {
+    setFocusTerm(null);
+  }
 });
 
 // ------------------------------------------------------------ WebSocket
@@ -656,6 +666,7 @@ const stream = new LiveStream((event, data) => {
       break;
     case "tick":
       state.nextTick = state.tickSeconds;
+      onTickBoundary();
       paintHeader();
       break;
   }
@@ -693,8 +704,19 @@ async function boot(): Promise<void> {
   stream.connect();
 
   // Sekundentakt: Uhr + Countdown
+  // Läuft lokal von allein weiter und springt bei 0 selbst wieder auf
+  // tickSeconds zurück - verlässt sich nicht mehr allein auf das "tick"-
+  // WS-Event vom Server. Blieb sonst dauerhaft bei 0 stehen, wenn genau
+  // dieses eine Event verloren ging oder der Server-Takt sich verzögerte
+  // (z.B. durch einen langsamen Collector-Lauf). Das echte "tick"-Event
+  // gleicht die Anzeige weiterhin mit dem Server ab, sobald es eintrifft.
   setInterval(() => {
-    state.nextTick = Math.max(0, state.nextTick - 1);
+    if (state.nextTick > 0) {
+      state.nextTick -= 1;
+    } else {
+      state.nextTick = state.tickSeconds;
+      onTickBoundary();
+    }
     paintHeader();
   }, 1000);
 
@@ -705,19 +727,6 @@ async function boot(): Promise<void> {
   setInterval(() => {
     if (!state.filters.paused) paintFeed();
   }, 60_000);
-
-  // Diagnose-Panel bei Bedarf frisch halten, solange geöffnet
-  setInterval(() => {
-    if (els.popDiag.style.display !== "none") {
-      void api
-        .diagnostics()
-        .then((d) => {
-          state.diagnostics = d;
-          paintDiagPanel();
-        })
-        .catch(() => {});
-    }
-  }, 15_000);
 }
 
 void boot();

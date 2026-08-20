@@ -1,4 +1,4 @@
-import type { Diagnostics, LogEntry, Post, SourceState, Stats, Term, UiSettings } from "./types";
+import type { LogEntry, Post, SourceState, Stats, Term, UiSettings } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -59,6 +59,4 @@ export const api = {
   settings: () => req<UiSettings>("/api/settings"),
   putSettings: (values: Record<string, string>) =>
     req<UiSettings>("/api/settings", { method: "PUT", body: JSON.stringify({ values }) }),
-
-  diagnostics: () => req<Diagnostics>("/api/diagnostics"),
 };

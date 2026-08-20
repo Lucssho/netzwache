@@ -21,6 +21,7 @@ const STATUS_TEXT: Record<string, string> = {
 export function renderSources(
   el: HTMLElement,
   sources: SourceState[],
+  activePlatforms: Set<string> | null,
   onToggle: (name: string, enabled: boolean) => void,
   onCollect: (name: string) => void,
 ): void {
@@ -34,8 +35,9 @@ export function renderSources(
       const led = LED[s.status] ?? "off";
       const inactive = s.status === "disabled";
       const detail = inactive && s.setup_hint ? s.setup_hint : s.detail;
+      const dim = activePlatforms && !activePlatforms.has(s.platform);
       return `
-      <div class="source ${s.enabled ? "" : "disabled"} ${s.status === "error" ? "err" : ""}"
+      <div class="source ${s.enabled ? "" : "disabled"} ${s.status === "error" ? "err" : ""} ${dim ? "dim" : ""}"
            data-name="${esc(s.name)}" title="Klick: Sofort sammeln &middot; Rechtsklick: an/aus">
         <span class="led ${led}"></span>
         <div>

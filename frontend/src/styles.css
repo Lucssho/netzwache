@@ -296,6 +296,11 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
   border-bottom: 1px solid var(--line-soft);
 }
 .col-outer-body { display: flex; flex-direction: column; gap: var(--gap-main); padding: var(--gap-main); min-height: 0; overflow-y: auto; }
+/* Verhindert, dass sich Suchbegriffe/Quellen bei wenig Platz gegenseitig auf
+   eine unbenutzbare Höhe zusammendrücken (z.B. Tag-Filterbox unterhalb des
+   sichtbaren Bereichs, Klicks landen dann im Panel darunter) - stattdessen
+   scrollt die ganze Suchraum-Spalte gemeinsam. */
+.col-outer-body .panel { min-height: 200px; }
 .col-outer.collapsed .col-outer-body { display: none; }
 .col-outer.collapsed #left-outer-title { display: none; }
 .col-outer.collapsed .col-outer-head { justify-content: center; }
@@ -343,6 +348,34 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
   background: var(--header-row-bg);
   border-radius: var(--radius) var(--radius) 0 0;
 }
+.focus-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-bottom: 1px solid var(--accent-soft);
+  font-size: 0.8rem;
+  color: var(--fg);
+  animation: popin 0.14s ease-out;
+}
+@keyframes popin { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+.focus-bar-label { display: flex; align-items: baseline; gap: 2px; }
+.focus-bar-label b { color: var(--accent); font-weight: 700; }
+.focus-bar-label #focus-bar-count { color: var(--dim); font-weight: 400; }
+#focus-bar-clear {
+  border: 1px solid var(--accent-soft);
+  background: transparent;
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#focus-bar-clear:hover { background: color-mix(in srgb, var(--accent) 15%, transparent); }
+
 .panel-title {
   font-size: 0.78rem;
   line-height: 1;
@@ -533,43 +566,6 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 .btn-go { border-color: var(--accent-soft); color: var(--accent); }
 .btn-go:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
-/* ===================== Popover (Darstellung / Diagnose) ===================== */
-.popover-anchor { position: relative; }
-.popover {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: 300px;
-  z-index: 500;
-  background: var(--popover-bg);
-  backdrop-filter: blur(26px) saturate(180%);
-  -webkit-backdrop-filter: blur(26px) saturate(180%);
-  border: 1px solid var(--border-med);
-  border-radius: var(--radius);
-  box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.75);
-  padding: 12px;
-  max-height: min(560px, calc(100vh - 130px));
-  overflow-y: auto;
-  animation: popin 0.14s ease-out;
-}
-.popover.wide { width: 380px; }
-@keyframes popin { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
-.popover h4 {
-  margin: 0 0 9px;
-  font-size: 0.73rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-.popover .row { margin-bottom: 11px; }
-.popover .row:last-child { margin-bottom: 0; }
-.popover label {
-  display: block;
-  font-size: 0.77rem;
-  color: var(--dimmer);
-  margin-bottom: 5px;
-}
-.popover select, .popover input[type="range"] { width: 100%; }
 .seg { display: flex; gap: 3px; background: var(--seg-bg); padding: 3px; border-radius: var(--radius-sm); border: 1px solid var(--line-soft); }
 .seg button {
   flex: 1;
@@ -581,40 +577,6 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
   color: var(--dim);
 }
 .seg button.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
-
-.diag-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 0;
-  font-size: 0.85rem;
-  border-bottom: 1px solid var(--line-soft);
-}
-.diag-row:last-child { border-bottom: none; }
-.diag-row .lbl { flex: 1; color: var(--fg); }
-.diag-row .val { color: var(--dim); font-size: 0.77rem; text-align: right; }
-.diag-row .val.ok { color: var(--accent); }
-.diag-row .val.bad { color: var(--red); }
-
-.issue {
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  margin-bottom: 6px;
-  overflow: hidden;
-}
-.issue summary {
-  padding: 7px 9px;
-  cursor: pointer;
-  font-size: 0.81rem;
-  color: var(--fg);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  list-style: none;
-}
-.issue summary::-webkit-details-marker { display: none; }
-.issue summary::before { content: "▸"; color: var(--dimmer); transition: transform 0.15s; }
-.issue[open] summary::before { transform: rotate(90deg); }
-.issue .body { padding: 0 10px 9px; font-size: 0.77rem; color: var(--dim); line-height: 1.5; }
-.issue .body b { color: var(--fg); font-weight: 600; }
 
 /* ===================== Quellen ===================== */
 .source {
@@ -632,6 +594,8 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 }
 .source:hover { border-color: var(--accent-soft); background: color-mix(in srgb, var(--accent) 4.5%, transparent); }
 .source.disabled { opacity: 0.55; }
+.source.dim { opacity: 0.32; filter: saturate(0.5); }
+.source.dim:hover { opacity: 0.7; filter: none; }
 .source .nm { font-size: 0.92rem; color: var(--fg-strong); display: flex; align-items: center; gap: 6px; }
 .source .meta { font-size: 0.77rem; color: var(--dim); margin-top: 2px; word-break: break-word; }
 .source .num { font-size: 1rem; font-weight: 700; color: var(--fg-strong); text-align: right; }
@@ -679,6 +643,17 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 .picon.googlenews { color: var(--p-googlenews); }
 
 /* ===================== Suchbegriffe ===================== */
+/* Bleibt oben im scrollbaren Panel angeheftet, statt mit der wachsenden
+   Chip-Liste aus dem sichtbaren Bereich zu rutschen - sonst landet der
+   "Tags filtern"-Button außerhalb des sichtbaren Fensters und Klicks
+   treffen stattdessen das darunterliegende Quellen-Panel. */
+.term-controls-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--panel-bg);
+  padding-bottom: 8px;
+}
 .term-input { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .term-input input { flex: 1 1 100%; min-width: 0; font-size: 1rem; padding: 10px 14px; }
 .term-input select { flex: 1; min-width: 0; font-size: 1rem; padding: 10px 10px; }
@@ -703,6 +678,40 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 @keyframes spin { to { transform: rotate(360deg); } }
 .term-status.done { color: var(--accent); }
 
+.term-search-wrap { position: relative; margin-bottom: 10px; }
+.term-search {
+  width: 100%;
+  font-size: 0.85rem;
+  padding: 7px 32px 7px 11px;
+  background: var(--card-bg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+}
+.term-search::placeholder { color: var(--dimmer); }
+.term-search:focus { border-color: var(--accent-soft); }
+/* Großzügige Klickfläche über die gesamte Eingabehöhe statt eines kleinen
+   18px-Kreises - der war offenbar leicht zu verfehlen (mehrere Klicks nötig). */
+.term-search-clear {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--dimmer);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+.term-search-clear:hover { color: var(--fg-strong); }
+.term-search-clear:active { color: var(--accent); }
+
 .terms { display: flex; flex-wrap: wrap; gap: 7px; }
 .chip {
   display: inline-flex;
@@ -714,14 +723,23 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
   border-radius: 15px;
   background: var(--card-bg);
   color: var(--fg);
-  cursor: default;
+  cursor: pointer;
+  transition: opacity 0.15s, border-color 0.15s, background 0.15s;
 }
+.chip:hover { border-color: var(--accent-soft); }
 .chip.off { opacity: 0.42; text-decoration: line-through; }
 .chip.fresh { animation: chipflash 1.6s ease-out; }
 @keyframes chipflash {
   0% { background: color-mix(in srgb, var(--accent) 28%, transparent); border-color: var(--accent); }
   100% { background: var(--card-bg); }
 }
+.chip.focused {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--fg-strong);
+}
+.terms.focus-active .chip:not(.focused) { opacity: 0.38; }
+.terms.focus-active .chip:not(.focused):hover { opacity: 0.8; }
 .chip .hits { color: var(--dimmer); font-size: 0.85rem; }
 .chip .x {
   cursor: pointer;

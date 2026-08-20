@@ -79,6 +79,7 @@ export interface Filters {
   query: string;
   minSeverity: number;
   paused: boolean;
+  focusTerm: string | null;
 }
 
 export type FontKey = "jetbrains" | "fira" | "sfmono" | "menlo" | "consolas" | "inter" | "system";
@@ -92,26 +93,3 @@ export interface UiSettings {
   [key: string]: string;
 }
 
-export interface CredentialStatus {
-  configured: boolean;
-  mode?: string;
-  handle?: string | null;
-  client_id?: string | null;
-  app_password?: string | null;
-  bearer_token?: string | null;
-}
-
-export interface KnownIssue {
-  id: string;
-  title: string;
-  symptom: string;
-  fix: string;
-}
-
-export interface Diagnostics {
-  database: { ok: boolean; engine: string };
-  redis: { connected: boolean; backend: string };
-  websocket_clients: number;
-  credentials: Record<string, CredentialStatus>;
-  known_issues: KnownIssue[];
-}
