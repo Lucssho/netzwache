@@ -22,3 +22,10 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Ruflo local secrets and runtime data
+.env.local
+.env.*.local
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
