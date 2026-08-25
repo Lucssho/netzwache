@@ -31,8 +31,8 @@ const state = {
   nextTick: 10,
   settings: { ...DEFAULT_SETTINGS } as UiSettings,
   sourcesOpen: false,
-  leftColOpen: true,
-  lagebildOpen: true,
+  leftColOpen: false,
+  lagebildOpen: false,
   feedVariant: "list" as FeedVariant,
   resurfacedPostId: null as number | null,
   resurfaceActive: false,
@@ -81,12 +81,12 @@ app.innerHTML = `
     </button>
   </div>
 
-  <div class="main" id="main-grid">
+  <div class="main left-collapsed right-collapsed" id="main-grid">
     <div class="col col-left">
-      <div class="col-outer" id="col-outer-left">
+      <div class="col-outer collapsed" id="col-outer-left">
         <div class="col-outer-head">
           <span class="panel-title" id="left-outer-title">Suchraum</span>
-          <button id="btn-leftcol-toggle" class="icon-btn collapse-toggle" title="Suchraum ein-/ausblenden">
+          <button id="btn-leftcol-toggle" class="icon-btn collapse-toggle flip" title="Suchraum ein-/ausblenden">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path d="M7 3.5 3.5 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M10.5 3.5 7 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -144,15 +144,15 @@ app.innerHTML = `
     <div class="col col-right">
       <section class="panel" style="flex:1 1 auto">
         <div class="panel-head">
-          <span class="panel-title" id="lagebild-title">Lagebild</span>
-          <button id="btn-lagebild-toggle" class="icon-btn collapse-toggle flip" title="Lagebild ein-/ausblenden">
+          <span class="panel-title" id="lagebild-title" style="display:none">Lagebild</span>
+          <button id="btn-lagebild-toggle" class="icon-btn collapse-toggle" title="Lagebild ein-/ausblenden">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path d="M7 3.5 3.5 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M10.5 3.5 7 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
         </div>
-        <div class="panel-body" id="stats"></div>
+        <div class="panel-body collapsed" id="stats"></div>
       </section>
     </div>
   </div>
