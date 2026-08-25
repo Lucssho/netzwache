@@ -8,9 +8,9 @@
 :root {
   /* Basis */
   --bg-0: #05070800;
-  --bg-1: #090d10;
-  --panel: #0d1317;
-  --panel-2: #111a1f;
+  --bg-1: #0b0f12;
+  --panel: #0b0f12;
+  --panel-2: #0b0f12;
   --line: #1b2830;
   --line-soft: #142027;
 
@@ -21,8 +21,11 @@
   --dimmer: #465c53;
 
   /* Terminal-Akzente */
-  --accent: #ff6a1a;
-  --accent-soft: #b3520f;
+  /* Primär-/Sekundärfarbe aus dem Styleguide-Entwurf des Marktplatzes. */
+  --accent: #951d40;
+  --accent-soft: #701630;
+  --secondary: #5b7995;
+  --secondary-soft: #445b70;
   --amber: #ffb454;
   --red: #ff5c5c;
   --gold: #ffcc33;
@@ -39,22 +42,22 @@
   --p-googlenews: #4285f4;
 
   /* Oberflächen (theme-abhängig, hier: Dark-Werte) */
-  --panel-bg: rgba(13, 19, 23, 0.72);
+  --panel-bg: rgba(11, 15, 18, 0.72);
   --sheen: rgba(255, 255, 255, 0.035);
   --scanline: rgba(255, 255, 255, 0.012);
-  --header-row-bg: #0d131766;
-  --header-grad: linear-gradient(90deg, #0a1014 0%, #0d1519 55%, #0a1014 100%);
-  --terminal-bg: rgba(0, 0, 0, 0.35);
+  --header-row-bg: #0b0f1266;
+  --header-grad: #0b0f12;
+  --terminal-bg: rgba(11, 15, 18, 0.35);
   --card-bg: rgba(255, 255, 255, 0.014);
   --badge-bg: rgba(255, 255, 255, 0.05);
   --dot-inactive: #2a3a42;
   --border-soft: rgba(255, 255, 255, 0.065);
   --border-med: rgba(255, 255, 255, 0.09);
-  --popover-bg: rgba(15, 21, 25, 0.92);
-  --seg-bg: #0a1114;
+  --popover-bg: rgba(11, 15, 18, 0.92);
+  --seg-bg: #0b0f12;
   --win-border: rgba(255, 255, 255, 0.07);
   --scroll-thumb: #1f2f37;
-  --page-bg-base: #030405;
+  --page-bg-base: #0b0f12;
   --page-bg: radial-gradient(ellipse 900px 600px at 18% -8%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 60%),
              radial-gradient(ellipse 900px 600px at 85% 110%, rgba(200, 16, 46, 0.04), transparent 55%),
              var(--page-bg-base);
@@ -81,7 +84,7 @@
   --radius: 10px;
   --radius-sm: 8px;
   --radius-win: 14px;
-  --glow: 0 0 12px rgba(255, 106, 26, 0.18);
+  --glow: 0 0 12px rgba(149, 29, 64, 0.18);
 }
 
 html[data-font="jetbrains"] { --font-ui: var(--f-jetbrains); }
@@ -118,8 +121,10 @@ html[data-theme="light"] {
   --dim: #62706b;
   --dimmer: #8a938e;
 
-  --accent: #d1550c;
-  --accent-soft: #a8440a;
+  --accent: #951d40;
+  --accent-soft: #701630;
+  --secondary: #5b7995;
+  --secondary-soft: #445b70;
   --amber: #b56a10;
   --red: #c23b3b;
   --gold: #a5790a;
@@ -414,6 +419,44 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
 .icon-btn.chevron svg { display: block; transform: rotate(-90deg); transition: transform 0.15s ease; }
 .icon-btn.chevron.open svg { transform: rotate(0deg); }
 
+/* Dark/Light-Umschalter als schiebender Toggle statt Icon-Tausch-Button */
+.theme-switch {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--seg-bg);
+  border: 1px solid var(--line-soft);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.theme-switch:hover { border-color: var(--accent-soft); }
+.ts-icon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--dimmer);
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+.ts-moon { left: 4px; }
+.ts-sun { right: 4px; }
+.theme-switch:not(.light) .ts-moon { color: var(--accent); }
+.theme-switch.light .ts-sun { color: var(--accent); }
+.theme-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s ease;
+}
+.theme-switch.light .theme-switch-knob { transform: translateX(20px); }
+
 /* ===================== Header / Titelleiste ===================== */
 header.top {
   display: flex;
@@ -436,15 +479,59 @@ header.top::after {
 
 #header-inner { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
 
-.brand { display: flex; align-items: center; gap: 12px; }
-.brand svg { filter: drop-shadow(0 0 6px rgba(255, 106, 26, 0.35)); }
+.brand { display: flex; align-items: center; gap: 4px; }
+.brand svg { filter: drop-shadow(0 0 6px rgba(149, 29, 64, 0.35)); }
+.ifis-badge {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  background: transparent;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.ifis-name {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  font-size: 1.6rem;
+  color: #5b7995;
+}
+.ifis-paren { color: #951d40; }
+.ifis-bracket { color: #9ab0c4; }
+/* Zweifarbiges "i": Schaft in Sekundärfarbe, Punkt in Primärfarbe. CSS kann
+   nicht nur den Punkt eines Glyphen einfärben, daher wird der native Punkt
+   mit der (einfarbigen) Kopfzeilen-Hintergrundfarbe überdeckt und ein neuer,
+   eigenständig eingefärbter Punkt darübergezeichnet. Position/Größe sind aus
+   einem Pixel-Scan des gerenderten Glyphen (JetBrains Mono, 700, 19.2px)
+   abgeleitet - bei einer Schriftart-/Größenänderung ggf. nachjustieren. */
+.ifis-i { position: relative; display: inline-block; }
+.ifis-i::before,
+.ifis-i::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0.2em;
+  height: 0.2em;
+  border-radius: 50%;
+}
+.ifis-i::before { top: -0.06em; background: #0b0f12; }
+.ifis-i::after { top: -0.02em; width: 0.14em; height: 0.14em; background: #951d40; }
+.ifis-tagline {
+  font-size: 0.505rem;
+  color: rgba(255, 255, 255, 0.72);
+  letter-spacing: 0.01em;
+}
 .brand-text h1 {
   margin: 0;
   font-size: 1.46rem;
   letter-spacing: 0.22em;
+  word-spacing: -0.5em;
   font-weight: 700;
   color: var(--fg-strong);
-  text-shadow: 0 0 14px rgba(255, 106, 26, 0.3);
+  text-shadow: 0 0 14px rgba(149, 29, 64, 0.3);
 }
 .brand-text .sub {
   font-size: 0.73rem;
@@ -541,9 +628,9 @@ header.top::after {
 .tab svg { flex: none; }
 .tab:hover { background: var(--badge-bg); color: var(--fg); }
 .tab.active {
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--secondary) 13%, transparent);
+  color: var(--secondary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--secondary) 35%, transparent);
 }
 .tab .cnt { color: var(--dimmer); margin-left: 2px; font-size: 0.77rem; }
 
@@ -576,7 +663,7 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
   border-radius: 6px;
   color: var(--dim);
 }
-.seg button.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.seg button.active { background: color-mix(in srgb, var(--secondary) 15%, transparent); color: var(--secondary); }
 
 /* ===================== Quellen ===================== */
 .source {

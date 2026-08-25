@@ -9,7 +9,7 @@ import { renderStats } from "./components/stats";
 import { renderTerms } from "./components/terms";
 import { platformIcon } from "./icons";
 import type { Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
-import { esc } from "./utils";
+import { esc, restrictToAlnum } from "./utils";
 import { LiveStream } from "./ws";
 
 const MAX_BUFFER = 400;
@@ -70,14 +70,15 @@ app.innerHTML = `
     <button id="btn-pause" class="btn-ghost" title="Live-Stream anhalten (Leertaste)">⏸ Pause</button>
     <button id="btn-collect" class="btn-go" title="Alle Quellen sofort abfragen">▶ Jetzt sammeln</button>
 
-    <button id="btn-theme" class="icon-btn" title="Design umschalten">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" data-icon="moon">
+    <button id="btn-theme" class="theme-switch" type="button" title="Design umschalten" role="switch" aria-checked="false">
+      <svg class="ts-icon ts-moon" width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" fill="currentColor"/>
       </svg>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" data-icon="sun" style="display:none">
+      <svg class="ts-icon ts-sun" width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <circle cx="12" cy="12" r="5" stroke="currentColor" stroke-width="2"/>
         <path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       </svg>
+      <span class="theme-switch-knob"></span>
     </button>
   </div>
 
@@ -474,8 +475,8 @@ function toast(message: string, isError = false): void {
 // ------------------------------------------------------------ Darstellung
 function paintThemeIcon(): void {
   const isLight = state.settings.theme === "light";
-  els.btnTheme.querySelector<SVGElement>('[data-icon="moon"]')!.style.display = isLight ? "none" : "block";
-  els.btnTheme.querySelector<SVGElement>('[data-icon="sun"]')!.style.display = isLight ? "block" : "none";
+  els.btnTheme.classList.toggle("light", isLight);
+  els.btnTheme.setAttribute("aria-checked", String(isLight));
 }
 
 async function toggleTheme(): Promise<void> {
@@ -557,6 +558,7 @@ async function refreshStats(): Promise<void> {
 }
 
 // ---------------------------------------------------------------- Events
+restrictToAlnum(els.search);
 els.search.addEventListener("input", () => {
   state.filters.query = els.search.value.trim();
   paintHeader();

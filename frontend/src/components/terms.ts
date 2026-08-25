@@ -1,5 +1,5 @@
 import type { Term } from "../types";
-import { esc } from "../utils";
+import { esc, restrictToAlnum } from "../utils";
 
 const CATEGORIES = ["cybersecurity", "it", "nachrichten", "alltag"];
 const CATEGORY_LABEL: Record<string, string> = {
@@ -73,6 +73,9 @@ export function renderTerms(
   const cat = el.querySelector<HTMLSelectElement>("#term-cat")!;
   const search = el.querySelector<HTMLInputElement>("#term-search");
   const searchClear = el.querySelector<HTMLButtonElement>("#term-search-clear");
+
+  restrictToAlnum(input);
+  if (search) restrictToAlnum(search);
 
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();

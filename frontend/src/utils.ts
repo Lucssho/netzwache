@@ -4,6 +4,23 @@ export function esc(s: string): string {
   );
 }
 
+/** Nur Buchstaben (auch Umlaute etc.) und Ziffern - alles andere wird entfernt. */
+export function alnumOnly(s: string): string {
+  return s.replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** Filtert ein Eingabefeld live auf Buchstaben/Ziffern und hält dabei die Cursorposition. */
+export function restrictToAlnum(input: HTMLInputElement): void {
+  input.addEventListener("input", () => {
+    const before = input.value;
+    const pos = input.selectionStart ?? before.length;
+    const removedBefore = before.slice(0, pos).length - alnumOnly(before.slice(0, pos)).length;
+    input.value = alnumOnly(before);
+    const newPos = Math.max(0, pos - removedBefore);
+    input.setSelectionRange(newPos, newPos);
+  });
+}
+
 export function relTime(iso: string | null): string {
   if (!iso) return "--";
   const d = new Date(iso).getTime();
