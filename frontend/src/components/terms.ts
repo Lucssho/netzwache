@@ -23,6 +23,7 @@ export function renderTerms(
     onFocus: (term: string) => void;
   },
   focusTerm: string | null,
+  isAdmin: boolean,
   freshId?: number,
 ): void {
   const q = tagSearch.trim().toLowerCase();
@@ -30,13 +31,17 @@ export function renderTerms(
 
   el.innerHTML = `
     <div class="term-controls-sticky">
-      <form class="term-input" id="term-form" autocomplete="off">
-        <input id="term-input" placeholder="neuer Suchbegriff …" maxlength="120" />
-        <select id="term-cat">
-          ${CATEGORIES.map((c) => `<option value="${c}">${CATEGORY_LABEL[c]}</option>`).join("")}
-        </select>
-        <button type="submit" class="btn-go" title="Begriff hinzufügen und sofort danach suchen">+</button>
-      </form>
+      ${
+        isAdmin
+          ? `<form class="term-input" id="term-form" autocomplete="off">
+               <input id="term-input" placeholder="neuer Suchbegriff …" maxlength="120" />
+               <select id="term-cat">
+                 ${CATEGORIES.map((c) => `<option value="${c}">${CATEGORY_LABEL[c]}</option>`).join("")}
+               </select>
+               <button type="submit" class="btn-go" title="Begriff hinzufügen und sofort danach suchen">+</button>
+             </form>`
+          : ""
+      }
       ${
         terms.length > 6
           ? `<div class="term-search-wrap">
@@ -55,10 +60,9 @@ export function renderTerms(
                 return `
         <span class="chip ${esc(t.category)} ${t.enabled ? "" : "off"} ${t.id === freshId ? "fresh" : ""} ${focused ? "focused" : ""}"
               data-id="${t.id}" data-term="${esc(t.term)}" title="Klick: nur diesen Begriff anzeigen">
-          <span class="tg" title="an/aus">${t.enabled ? "●" : "○"}</span>
+          ${isAdmin ? `<span class="tg" title="an/aus">${t.enabled ? "●" : "○"}</span>` : ""}
           <span class="lbl">${esc(t.term)}</span>
-          <span class="hits">${t.hits}</span>
-          <span class="x" title="löschen">×</span>
+          ${isAdmin ? `<span class="x" title="löschen">×</span>` : ""}
         </span>`;
               })
               .join("")
@@ -68,17 +72,18 @@ export function renderTerms(
       }
     </div>`;
 
-  const form = el.querySelector<HTMLFormElement>("#term-form")!;
-  const input = el.querySelector<HTMLInputElement>("#term-input")!;
-  const cat = el.querySelector<HTMLSelectElement>("#term-cat")!;
+  const form = el.querySelector<HTMLFormElement>("#term-form");
+  const input = el.querySelector<HTMLInputElement>("#term-input");
+  const cat = el.querySelector<HTMLSelectElement>("#term-cat");
   const search = el.querySelector<HTMLInputElement>("#term-search");
   const searchClear = el.querySelector<HTMLButtonElement>("#term-search-clear");
 
-  restrictToAlnum(input);
+  if (input) restrictToAlnum(input);
   if (search) restrictToAlnum(search);
 
-  form.addEventListener("submit", (ev) => {
+  form?.addEventListener("submit", (ev) => {
     ev.preventDefault();
+    if (!input || !cat) return;
     const value = input.value.trim();
     if (value.length < 2) return;
     handlers.onAdd(value, cat.value);

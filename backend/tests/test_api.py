@@ -4,7 +4,10 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_full_api_flow(app_client: httpx.AsyncClient):
+async def test_full_api_flow(app_client: httpx.AsyncClient, admin_client: httpx.AsyncClient):
+    # admin_client meldet sich auf demselben Client-Objekt an (Cookie-Jar wird
+    # geteilt) - alle folgenden Schreibzugriffe über app_client laufen also
+    # bereits als Admin.
     # Health
     r = await app_client.get("/api/health")
     assert r.status_code == 200

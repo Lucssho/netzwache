@@ -14,6 +14,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_netzwache.db")
 os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:1/0")  # bewusst tot -> Memory-Fallback
 os.environ.setdefault("TICK_SECONDS", "3600")                # Scheduler stört den Test nicht
 
+# Fester Admin-Testzugang - nur für die Testsuite, kein echtes Geheimnis.
+os.environ.setdefault("ADMIN_USERNAME", "testadmin")
+os.environ.setdefault("ADMIN_PASSWORD", "test-only-password-not-a-secret")
+os.environ.setdefault("SESSION_SECRET", "test-only-session-secret-fixed-value")
+
 # Zugangsdaten für die Tests immer leeren, unabhängig von einer lokalen .env -
 # Tests für den "nicht konfiguriert"-Zustand dürfen nicht von echten Credentials
 # eines Entwicklers abhängen.
@@ -54,6 +59,19 @@ async def app_client():
         # lifespan manuell fahren, damit init_db/seed/engine laufen
         async with app.router.lifespan_context(app):
             yield client
+
+
+@pytest_asyncio.fixture
+async def admin_client(app_client):
+    """Derselbe Client wie app_client, aber mit eingeloggter Admin-Session -
+    httpx.AsyncClient hält Cookies über Requests hinweg, also gilt der Login
+    für alle weiteren Aufrufe auf demselben Objekt."""
+    r = await app_client.post(
+        "/api/auth/login",
+        json={"username": os.environ["ADMIN_USERNAME"], "password": os.environ["ADMIN_PASSWORD"]},
+    )
+    assert r.status_code == 200, r.text
+    return app_client
 
 
 @pytest_asyncio.fixture

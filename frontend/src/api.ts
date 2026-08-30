@@ -5,6 +5,7 @@ const BASE = import.meta.env.VITE_API_BASE ?? "";
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "include", // Session-Cookie mitschicken/empfangen (Admin-Login)
     ...init,
   });
   if (!res.ok) {
@@ -59,4 +60,12 @@ export const api = {
   settings: () => req<UiSettings>("/api/settings"),
   putSettings: (values: Record<string, string>) =>
     req<UiSettings>("/api/settings", { method: "PUT", body: JSON.stringify({ values }) }),
+
+  authMe: () => req<{ authenticated: boolean }>("/api/auth/me"),
+  authLogin: (username: string, password: string) =>
+    req<{ authenticated: boolean }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  authLogout: () => req<{ authenticated: boolean }>("/api/auth/logout", { method: "POST" }),
 };

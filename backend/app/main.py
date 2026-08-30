@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc, select
+from starlette.middleware.sessions import SessionMiddleware
 
 from .api import router
 from .config import settings
@@ -58,6 +59,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.session_secret,
+    session_cookie="netzwache_session",
+    max_age=settings.admin_session_max_age,
+    same_site="lax",
+    https_only=settings.environment == "production",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_list,

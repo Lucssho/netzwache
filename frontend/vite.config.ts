@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 
 // Im Dev-Modus (npm run dev) laufen API und WebSocket auf dem Backend
@@ -21,5 +22,9 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: false,
     target: "es2022",
+  },
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.ts"],
   },
 });

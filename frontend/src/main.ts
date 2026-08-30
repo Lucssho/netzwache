@@ -7,6 +7,7 @@ import { applySettings } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
 import { renderTerms } from "./components/terms";
+import { getFocusTerm as getStoredFocusTerm, setFocusTerm as persistFocusTerm } from "./focusStorage";
 import { platformIcon } from "./icons";
 import type { Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
 import { esc, restrictToAlnum } from "./utils";
@@ -30,6 +31,7 @@ const state = {
   tickSeconds: 10,
   nextTick: 10,
   settings: { ...DEFAULT_SETTINGS } as UiSettings,
+  isAdmin: false,
   sourcesOpen: false,
   leftColOpen: false,
   lagebildOpen: false,
@@ -43,7 +45,7 @@ const state = {
     query: "",
     minSeverity: 0,
     paused: false,
-    focusTerm: null,
+    focusTerm: getStoredFocusTerm(),
   } as Filters,
 };
 
@@ -80,6 +82,16 @@ app.innerHTML = `
       </svg>
       <span class="theme-switch-knob"></span>
     </button>
+
+    <div class="admin-login-anchor">
+      <button id="btn-admin" class="btn-ghost" type="button" title="Admin-Anmeldung">Admin</button>
+      <form id="admin-login-form" class="admin-login" style="display:none" autocomplete="off">
+        <input id="admin-user" placeholder="Benutzername" autocomplete="username" />
+        <input id="admin-pass" type="password" placeholder="Passwort" autocomplete="current-password" />
+        <button type="submit" class="btn-go">Anmelden</button>
+        <div class="admin-login-err" id="admin-login-err"></div>
+      </form>
+    </div>
   </div>
 
   <div class="main left-collapsed right-collapsed" id="main-grid">
@@ -171,6 +183,11 @@ const els = {
   btnPause: $<HTMLButtonElement>("btn-pause"),
   btnCollect: $<HTMLButtonElement>("btn-collect"),
   btnTheme: $<HTMLButtonElement>("btn-theme"),
+  btnAdmin: $<HTMLButtonElement>("btn-admin"),
+  adminLoginForm: $<HTMLFormElement>("admin-login-form"),
+  adminUser: $<HTMLInputElement>("admin-user"),
+  adminPass: $<HTMLInputElement>("admin-pass"),
+  adminLoginErr: $("admin-login-err"),
   sources: $("sources"),
   btnSourcesToggle: $<HTMLButtonElement>("btn-sources-toggle"),
   mainGrid: $("main-grid"),
@@ -199,9 +216,14 @@ const PLATFORMS = [
   ["bluesky", "Bluesky"],
   ["reddit", "Reddit"],
   ["googlenews", "Google News"],
+  ["news", "News"],
+];
+// Noch ohne Daten (keine aktiven Zugangsdaten) - hinter "Mehr" versteckt,
+// statt leere Tabs in der Hauptleiste zu zeigen. Klick zeigt einen
+// "demnächst verfügbar"-Hinweis statt tatsächlich zu filtern.
+const MORE_PLATFORMS = [
   ["x", "X"],
   ["facebook", "Facebook"],
-  ["news", "News"],
 ];
 const CATEGORIES = [
   ["all", "alle themen"],
@@ -212,24 +234,50 @@ const CATEGORIES = [
 ];
 
 function renderTabs(): void {
-  els.tabPlatform.innerHTML = PLATFORMS.map(
-    ([v, l]) =>
-      `<button class="tab ${state.filters.platform === v ? "active" : ""}" data-v="${v}">
+  els.tabPlatform.innerHTML =
+    PLATFORMS.map(
+      ([v, l]) =>
+        `<button class="tab ${state.filters.platform === v ? "active" : ""}" data-v="${v}">
        ${v !== "all" ? platformIcon(v, 12) : ""}<span>${l}</span>
        ${v !== "all" && state.stats?.by_platform[v] ? `<span class="cnt">${state.stats.by_platform[v]}</span>` : ""}
        </button>`,
-  ).join("");
+    ).join("") +
+    `<div class="tabs-more-anchor">
+       <button class="tab tab-more" id="btn-more-platforms" type="button">
+         <span>Mehr</span>
+         <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+           <path d="M3 4 6 8l3-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+         </svg>
+       </button>
+       <div class="tabs-more-panel" id="more-platforms-panel" style="display:none">
+         ${MORE_PLATFORMS.map(
+           ([v, l]) => `<button class="tab" data-v="${v}">${platformIcon(v, 12)}<span>${l}</span></button>`,
+         ).join("")}
+       </div>
+     </div>`;
   els.tabCategory.innerHTML = CATEGORIES.map(
     ([v, l]) => `<button class="tab ${state.filters.category === v ? "active" : ""}" data-v="${v}"><span>${l}</span></button>`,
   ).join("");
 
-  els.tabPlatform.querySelectorAll<HTMLElement>(".tab").forEach((b) =>
+  els.tabPlatform.querySelectorAll<HTMLElement>(".tabs-more-panel .tab").forEach((b) =>
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      toast(`${b.dataset.v === "x" ? "X" : "Facebook"}: demnächst verfügbar`);
+      els.tabPlatform.querySelector<HTMLElement>("#more-platforms-panel")!.style.display = "none";
+    }),
+  );
+  els.tabPlatform.querySelectorAll<HTMLElement>(":scope > .tab:not(.tab-more)").forEach((b) =>
     b.addEventListener("click", () => {
       state.filters.platform = b.dataset.v!;
       renderTabs();
       void reloadPosts();
     }),
   );
+  els.tabPlatform.querySelector<HTMLButtonElement>("#btn-more-platforms")!.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const panel = els.tabPlatform.querySelector<HTMLElement>("#more-platforms-panel")!;
+    panel.style.display = panel.style.display === "none" ? "flex" : "none";
+  });
   els.tabCategory.querySelectorAll<HTMLElement>(".tab").forEach((b) =>
     b.addEventListener("click", () => {
       state.filters.category = b.dataset.v!;
@@ -238,6 +286,12 @@ function renderTabs(): void {
     }),
   );
 }
+
+document.addEventListener("click", (ev) => {
+  const panel = document.getElementById("more-platforms-panel");
+  const anchor = panel?.closest(".tabs-more-anchor");
+  if (anchor && !anchor.contains(ev.target as Node)) panel!.style.display = "none";
+});
 
 function matchesFilter(p: Post): boolean {
   const f = state.filters;
@@ -272,10 +326,33 @@ function filterLabel(): string {
 // Fokus-Leiste) hebt den Fokus wieder auf.
 function setFocusTerm(term: string | null): void {
   state.filters.focusTerm = state.filters.focusTerm === term ? null : term;
+  persistFocusTerm(state.filters.focusTerm);
   paintFeed();
   paintSources();
   paintTerms();
   paintHeader();
+  if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
+}
+
+// Fokus-Modus filtert nur bereits geladene Beiträge (state.posts) - standard-
+// mäßig aber nur die letzten ~150-400. Ein Tag mit vielen Treffern insgesamt
+// (Chip zeigt z.B. "201") kann trotzdem "Kein Treffer" zeigen, wenn zufällig
+// keiner der aktuell geladenen Beiträge darunter ist. Holt beim Aktivieren
+// gezielt passende Beiträge nach - weiterhin nur ein rein lesender GET, wie
+// von der Fokus-Modus-Spezifikation erlaubt.
+async function hydrateFocusMatches(term: string): Promise<void> {
+  try {
+    const res = await api.posts({ q: term, limit: 200 });
+    if (state.filters.focusTerm !== term) return; // Fokus zwischenzeitlich gewechselt/aufgehoben
+    const known = new Set(state.posts.map((p) => p.id));
+    const fresh = res.items.filter((p) => !known.has(p.id) && (p.matched_terms || []).includes(term));
+    if (!fresh.length) return;
+    state.posts = [...state.posts, ...fresh].slice(0, MAX_BUFFER + 200);
+    paintFeed();
+    paintSources();
+  } catch {
+    /* stiller Fallback - Fokus bleibt auf den bereits geladenen Beiträgen beschränkt */
+  }
 }
 
 // ---------------------------------------------------------------- Render
@@ -384,6 +461,7 @@ function paintSources(): void {
     els.sources,
     state.sources,
     activePlatforms,
+    state.isAdmin,
     async (name, enabled) => {
       await api.patchSource(name, { enabled });
       toast(`${name}: ${enabled ? "aktiviert" : "deaktiviert"}`);
@@ -460,6 +538,7 @@ function paintTerms(freshId?: number): void {
       onFocus: (term) => setFocusTerm(term),
     },
     state.filters.focusTerm,
+    state.isAdmin,
     freshId,
   );
 }
@@ -479,21 +558,76 @@ function paintThemeIcon(): void {
   els.btnTheme.setAttribute("aria-checked", String(isLight));
 }
 
+// Rein clientseitig (localStorage) statt PUT /api/settings: Theme ist eine
+// persönliche Anzeige-Präferenz, kein geteilter Server-Zustand - ein Wechsel
+// hier darf keine anderen Besucher betreffen und braucht daher keinen
+// (jetzt Admin-geschützten) Schreibzugriff auf den Server.
 async function toggleTheme(): Promise<void> {
   const theme = state.settings.theme === "light" ? "dark" : "light";
   state.settings = { ...state.settings, theme };
   applySettings(state.settings);
   paintThemeIcon();
   try {
-    state.settings = await api.putSettings({ theme });
-  } catch (e) {
-    toast(`Einstellung nicht gespeichert: ${e}`, true);
+    localStorage.setItem("netzwache.theme", theme);
+  } catch {
+    /* Storage nicht verfügbar - Wahl gilt dann nur für diese Sitzung */
   }
 }
 
 els.btnTheme.addEventListener("click", () => void toggleTheme());
 
 els.focusBarClear.addEventListener("click", () => setFocusTerm(null));
+
+// -------------------------------------------------------------- Admin-Login
+// Sichtbarkeit der Admin-Bedienelemente hängt allein von state.isAdmin ab,
+// das wiederum nur durch eine erfolgreiche Server-Antwort gesetzt wird
+// (/api/auth/me, /api/auth/login) - das Verstecken hier ist reine UX, die
+// eigentliche Durchsetzung passiert serverseitig (Depends(require_admin)).
+function applyAdminUi(): void {
+  els.btnCollect.style.display = state.isAdmin ? "" : "none";
+  els.btnAdmin.textContent = state.isAdmin ? "Logout" : "Admin";
+  els.btnAdmin.title = state.isAdmin ? "Admin-Sitzung beenden" : "Admin-Anmeldung";
+  els.adminLoginForm.style.display = "none";
+  paintTerms();
+  paintSources();
+}
+
+els.btnAdmin.addEventListener("click", () => {
+  if (state.isAdmin) {
+    void (async () => {
+      await api.authLogout().catch(() => undefined);
+      state.isAdmin = false;
+      applyAdminUi();
+      toast("Admin-Sitzung beendet");
+    })();
+    return;
+  }
+  const opening = els.adminLoginForm.style.display === "none";
+  els.adminLoginForm.style.display = opening ? "flex" : "none";
+  if (opening) els.adminUser.focus();
+});
+
+els.adminLoginForm.addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  void (async () => {
+    els.adminLoginErr.textContent = "";
+    try {
+      const res = await api.authLogin(els.adminUser.value, els.adminPass.value);
+      state.isAdmin = res.authenticated;
+      els.adminPass.value = "";
+      applyAdminUi();
+      toast("Als Admin angemeldet");
+    } catch (e) {
+      els.adminLoginErr.textContent = String(e);
+    }
+  })();
+});
+
+document.addEventListener("click", (ev) => {
+  const t = ev.target as Node;
+  const anchor = els.btnAdmin.closest(".admin-login-anchor");
+  if (anchor && !anchor.contains(t)) els.adminLoginForm.style.display = "none";
+});
 
 // ------------------------------------------------------------ Datenfluss
 async function reloadPosts(): Promise<void> {
@@ -687,18 +821,29 @@ async function boot(): Promise<void> {
     toast("Backend nicht erreichbar – läuft es auf Port 8000?", true);
   }
 
-  const [sources, terms, settings] = await Promise.all([
+  const [sources, terms, settings, auth] = await Promise.all([
     api.sources().catch(() => []),
     api.terms().catch(() => []),
     api.settings().catch(() => DEFAULT_SETTINGS),
+    api.authMe().catch(() => ({ authenticated: false })),
   ]);
   state.sources = sources;
   state.terms = terms;
   state.settings = settings;
+  state.isAdmin = auth.authenticated;
+  // Eigene, zuvor lokal gespeicherte Theme-Wahl geht vor dem Server-Standard -
+  // siehe toggleTheme(): Theme wird nicht mehr per PUT /api/settings geschrieben.
+  try {
+    const storedTheme = localStorage.getItem("netzwache.theme");
+    if (storedTheme === "light" || storedTheme === "dark") {
+      state.settings = { ...state.settings, theme: storedTheme };
+    }
+  } catch {
+    /* Storage nicht verfügbar - Server-Standard bleibt bestehen */
+  }
   applySettings(state.settings);
   paintThemeIcon();
-  paintSources();
-  paintTerms();
+  applyAdminUi();
 
   await reloadPosts();
   await refreshStats();

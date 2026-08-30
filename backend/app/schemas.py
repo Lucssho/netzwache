@@ -4,6 +4,11 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator
 
 
+class AdminLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
 class TermIn(BaseModel):
     term: str = Field(min_length=2, max_length=200)
     category: str = "it"

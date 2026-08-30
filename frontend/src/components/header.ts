@@ -17,10 +17,7 @@ export function renderHeader(
 
   el.innerHTML = `
     <div class="brand">
-      <div class="ifis-badge">
-        <span class="ifis-name"><span class="ifis-i">i</span>f<span class="ifis-bracket">(</span><span class="ifis-paren">is</span><span class="ifis-bracket">)</span></span>
-        <span class="ifis-tagline">internet-sicherheit</span>
-      </div>
+      <img class="ifis-logo" src="/favicon.png" alt="if(is) - Institut für Internet-Sicherheit" />
       <div class="brand-text">
         <h1>Cyber Shield</h1>
         <div class="sub">Multi-Plattform Lagebild &middot; OSINT Collector</div>

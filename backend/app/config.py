@@ -1,6 +1,7 @@
 """Zentrale Konfiguration - alles über Umgebungsvariablen / .env steuerbar."""
 from __future__ import annotations
 
+import secrets
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -16,6 +17,20 @@ class Settings(BaseSettings):
     version: str = "1.0.0"
     log_level: str = "INFO"
     cors_origins: str = "*"
+    environment: str = "development"  # "production" schaltet Secure-Cookies scharf
+
+    # --- Admin-Login ------------------------------------------------------
+    # Schützt alle schreibenden Endpunkte (Suchbegriffe, Quellen, Sammel-Läufe,
+    # Einstellungen). Leeres Passwort = Login in dieser Umgebung deaktiviert.
+    # NIEMALS einen echten Wert hier oder in .env.example eintragen - nur in
+    # der lokalen, nicht versionierten .env bzw. als echte Prod-Env-Variable.
+    admin_username: str = "admin"
+    admin_password: str = ""
+    # Signiert das Session-Cookie. Leer = bei jedem Prozessstart zufällig neu
+    # erzeugt (meldet bestehende Admin-Sessions nach einem Neustart ab) - für
+    # Produktion mit mehreren Workern/Neustarts einen festen Wert setzen.
+    session_secret: str = secrets.token_urlsafe(32)
+    admin_session_max_age: int = 8 * 60 * 60  # 8 Stunden
 
     # --- Datenbank / Cache ---------------------------------------------
     # Postgres im Docker-Compose. Ohne Docker: sqlite+aiosqlite:///./netzwache.db

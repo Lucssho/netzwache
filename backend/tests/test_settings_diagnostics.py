@@ -3,14 +3,14 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_settings_defaults_then_persist(app_client):
+async def test_settings_defaults_then_persist(app_client, admin_client):
     r = await app_client.get("/api/settings")
     assert r.status_code == 200
     defaults = r.json()
     assert defaults["font_family"] == "jetbrains"
     assert defaults["font_size"] == "13"
 
-    r = await app_client.put(
+    r = await admin_client.put(
         "/api/settings", json={"values": {"font_family": "menlo", "font_size": "15"}}
     )
     assert r.status_code == 200
@@ -25,8 +25,8 @@ async def test_settings_defaults_then_persist(app_client):
 
 
 @pytest.mark.asyncio
-async def test_settings_rejects_bad_keys(app_client):
-    r = await app_client.put("/api/settings", json={"values": {"böse key!": "x"}})
+async def test_settings_rejects_bad_keys(admin_client):
+    r = await admin_client.put("/api/settings", json={"values": {"böse key!": "x"}})
     assert r.status_code == 422
 
 

@@ -22,6 +22,7 @@ export function renderSources(
   el: HTMLElement,
   sources: SourceState[],
   activePlatforms: Set<string> | null,
+  isAdmin: boolean,
   onToggle: (name: string, enabled: boolean) => void,
   onCollect: (name: string) => void,
 ): void {
@@ -30,6 +31,8 @@ export function renderSources(
     return;
   }
 
+  const title = isAdmin ? "Klick: Sofort sammeln &middot; Rechtsklick: an/aus" : "";
+
   el.innerHTML = sources
     .map((s) => {
       const led = LED[s.status] ?? "off";
@@ -37,8 +40,8 @@ export function renderSources(
       const detail = inactive && s.setup_hint ? s.setup_hint : s.detail;
       const dim = activePlatforms && !activePlatforms.has(s.platform);
       return `
-      <div class="source ${s.enabled ? "" : "disabled"} ${s.status === "error" ? "err" : ""} ${dim ? "dim" : ""}"
-           data-name="${esc(s.name)}" title="Klick: Sofort sammeln &middot; Rechtsklick: an/aus">
+      <div class="source ${s.enabled ? "" : "disabled"} ${s.status === "error" ? "err" : ""} ${dim ? "dim" : ""} ${isAdmin ? "" : "readonly"}"
+           data-name="${esc(s.name)}" title="${title}">
         <span class="led ${led}"></span>
         <div>
           <div class="nm">
@@ -58,6 +61,8 @@ export function renderSources(
       </div>`;
     })
     .join("");
+
+  if (!isAdmin) return; // öffentliche Ansicht: rein informativ, keine Aktionen
 
   el.querySelectorAll<HTMLElement>(".source").forEach((node) => {
     const name = node.dataset.name!;

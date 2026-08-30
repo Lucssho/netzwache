@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import delete, desc, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import is_admin, require_admin, verify_admin_credentials
 from ..collectors import COLLECTOR_CLASSES
 from ..config import settings
 from ..db import get_session
@@ -15,7 +16,7 @@ from ..enrich import CATEGORIES
 from ..hub import hub
 from ..models import EventLog, Post, SearchTerm, SourceState, UiSetting
 from ..scheduler import engine
-from ..schemas import SettingsPatch, SourcePatch, TermIn, TermPatch
+from ..schemas import AdminLogin, SettingsPatch, SourcePatch, TermIn, TermPatch
 
 router = APIRouter(prefix="/api")
 
@@ -50,6 +51,25 @@ async def health() -> dict:
         "dedup_backend": dedup.backend,
         "ws_clients": hub.count,
     }
+
+
+@router.post("/auth/login")
+async def login(body: AdminLogin, request: Request) -> dict:
+    if not verify_admin_credentials(body.username, body.password):
+        raise HTTPException(401, "Benutzername oder Passwort falsch")
+    request.session["admin"] = True
+    return {"authenticated": True}
+
+
+@router.post("/auth/logout")
+async def logout(request: Request) -> dict:
+    request.session.clear()
+    return {"authenticated": False}
+
+
+@router.get("/auth/me")
+async def whoami(request: Request) -> dict:
+    return {"authenticated": is_admin(request)}
 
 
 @router.get("/meta")
@@ -216,7 +236,7 @@ async def list_sources(session: AsyncSession = Depends(get_session)) -> list[dic
     return out
 
 
-@router.patch("/sources/{name}")
+@router.patch("/sources/{name}", dependencies=[Depends(require_admin)])
 async def patch_source(
     name: str, patch: SourcePatch, session: AsyncSession = Depends(get_session)
 ) -> dict:
@@ -231,7 +251,7 @@ async def patch_source(
     return row.to_dict()
 
 
-@router.post("/collect")
+@router.post("/collect", dependencies=[Depends(require_admin)])
 async def collect_now(source: str | None = None) -> dict:
     """Sofort sammeln (ignoriert die Intervalle)."""
     force = [source] if source else list(engine.collectors.keys())
@@ -250,7 +270,7 @@ async def list_terms(session: AsyncSession = Depends(get_session)) -> list[dict]
     return [r.to_dict() for r in rows]
 
 
-@router.post("/terms", status_code=201)
+@router.post("/terms", status_code=201, dependencies=[Depends(require_admin)])
 async def create_term(body: TermIn, session: AsyncSession = Depends(get_session)) -> dict:
     exists = (
         await session.execute(
@@ -272,7 +292,7 @@ async def create_term(body: TermIn, session: AsyncSession = Depends(get_session)
     return row.to_dict()
 
 
-@router.patch("/terms/{term_id}")
+@router.patch("/terms/{term_id}", dependencies=[Depends(require_admin)])
 async def patch_term(
     term_id: int, patch: TermPatch, session: AsyncSession = Depends(get_session)
 ) -> dict:
@@ -288,7 +308,10 @@ async def patch_term(
     return row.to_dict()
 
 
-@router.delete("/terms/{term_id}", status_code=204, response_class=Response)
+@router.delete(
+    "/terms/{term_id}", status_code=204, response_class=Response,
+    dependencies=[Depends(require_admin)],
+)
 async def delete_term(term_id: int, session: AsyncSession = Depends(get_session)):
     row = await session.get(SearchTerm, term_id)
     if not row:
@@ -309,7 +332,7 @@ async def event_log(
     return [r.to_dict() for r in rows]
 
 
-@router.post("/maintenance/cleanup")
+@router.post("/maintenance/cleanup", dependencies=[Depends(require_admin)])
 async def cleanup() -> dict:
     removed = await engine.cleanup()
     return {"removed": removed, "retention_days": settings.retention_days}
@@ -323,7 +346,7 @@ async def get_ui_settings(session: AsyncSession = Depends(get_session)) -> dict:
     return values
 
 
-@router.put("/settings")
+@router.put("/settings", dependencies=[Depends(require_admin)])
 async def put_ui_settings(
     patch: SettingsPatch, session: AsyncSession = Depends(get_session)
 ) -> dict:
