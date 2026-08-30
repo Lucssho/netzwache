@@ -298,7 +298,14 @@ function matchesFilter(p: Post): boolean {
   if (f.platform !== "all" && p.platform !== f.platform) return false;
   if (f.category !== "all" && !(p.categories || []).includes(f.category)) return false;
   if (f.minSeverity && p.severity < f.minSeverity) return false;
-  if (f.focusTerm && !(p.matched_terms || []).includes(f.focusTerm)) return false;
+  // Bewusst per Freitext-Enthaltensein geprüft (wie f.query unten), nicht
+  // über matched_terms: ein Beitrag, der schon vor dem Anlegen dieses Begriffs
+  // existierte, wurde nie rückwirkend mit ihm getaggt, obwohl sein Text ihn
+  // enthalten kann - matched_terms wäre hier also fälschlich leer.
+  if (f.focusTerm) {
+    const ft = f.focusTerm.toLowerCase();
+    if (!`${p.title} ${p.text} ${p.author} ${p.source}`.toLowerCase().includes(ft)) return false;
+  }
   if (f.query) {
     const q = f.query.toLowerCase();
     if (!`${p.title} ${p.text} ${p.author} ${p.source}`.toLowerCase().includes(q)) return false;
@@ -345,7 +352,7 @@ async function hydrateFocusMatches(term: string): Promise<void> {
     const res = await api.posts({ q: term, limit: 200 });
     if (state.filters.focusTerm !== term) return; // Fokus zwischenzeitlich gewechselt/aufgehoben
     const known = new Set(state.posts.map((p) => p.id));
-    const fresh = res.items.filter((p) => !known.has(p.id) && (p.matched_terms || []).includes(term));
+    const fresh = res.items.filter((p) => !known.has(p.id));
     if (!fresh.length) return;
     state.posts = [...state.posts, ...fresh].slice(0, MAX_BUFFER + 200);
     paintFeed();
