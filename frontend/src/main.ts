@@ -41,7 +41,7 @@ const state = {
   stallStreak: {} as Record<string, number>,
   filters: {
     platform: "all",
-    category: "all",
+    category: "cybersecurity",
     query: "",
     minSeverity: 0,
     paused: false,
