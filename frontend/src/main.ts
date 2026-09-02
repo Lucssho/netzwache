@@ -7,7 +7,12 @@ import { applySettings } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
 import { renderTerms } from "./components/terms";
-import { getFocusTerm as getStoredFocusTerm, setFocusTerm as persistFocusTerm } from "./focusStorage";
+import {
+  getFocusTerm as getStoredFocusTerm,
+  getFocusWindowMinutes as getStoredFocusWindowMinutes,
+  setFocusTerm as persistFocusTerm,
+  setFocusWindowMinutes as persistFocusWindowMinutes,
+} from "./focusStorage";
 import { platformIcon } from "./icons";
 import type { Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
 import { esc, restrictToAlnum } from "./utils";
@@ -46,6 +51,7 @@ const state = {
     minSeverity: 0,
     paused: false,
     focusTerm: getStoredFocusTerm(),
+    focusWindowMinutes: getStoredFocusWindowMinutes(),
   } as Filters,
 };
 
@@ -146,6 +152,12 @@ app.innerHTML = `
         </div>
         <div class="focus-bar" id="focus-bar" style="display:none">
           <span class="focus-bar-label">Fokus auf <b id="focus-bar-term"></b><span id="focus-bar-count"></span></span>
+          <div class="seg focus-window-toggle" id="focus-window-toggle" title="Nur Treffer aus diesem Zeitraum zeigen">
+            <button type="button" data-min="5" title="letzte 5 Minuten">Jetzt</button>
+            <button type="button" data-min="60" title="letzte Stunde">1 Std</button>
+            <button type="button" data-min="1440" title="letzte 24 Stunden">24 Std</button>
+            <button type="button" data-min="0" class="active" title="kein Zeitfilter">Alle</button>
+          </div>
           <button type="button" id="focus-bar-clear" title="Fokus aufheben (Esc)">Fokus aufheben ✕</button>
         </div>
         <div class="panel-body tight" id="feed-scroll">
@@ -206,6 +218,7 @@ const els = {
   focusBarTerm: $("focus-bar-term"),
   focusBarCount: $("focus-bar-count"),
   focusBarClear: $<HTMLButtonElement>("focus-bar-clear"),
+  focusWindowToggle: $("focus-window-toggle"),
   stats: $("stats"),
   toasts: $("toasts"),
 };
@@ -305,6 +318,18 @@ function matchesFilter(p: Post): boolean {
   if (f.focusTerm) {
     const ft = f.focusTerm.toLowerCase();
     if (!`${p.title} ${p.text} ${p.author} ${p.source}`.toLowerCase().includes(ft)) return false;
+    // Zeitfenster gilt nur im Fokus-Modus - blendet auf Wunsch alles vor
+    // "jetzt"/"1h"/"24h" aus, damit man nach dem Fokussieren nicht durch bis
+    // zu 200 gepufferte Treffer scrollen muss. Bewusst collected_at statt
+    // created_at (wie die "vor Xm"-Anzeige in feed.ts): created_at ist die
+    // Original-Zeit von der Quelle und kann bei RSS/Reddit deutlich älter
+    // sein als der Zeitpunkt, zu dem wir den Beitrag tatsächlich eingesammelt
+    // haben - sonst würde "Jetzt" gerade erst hereingekommene Treffer
+    // rausfiltern, die im Feed als "vor 1m" angezeigt werden.
+    if (f.focusWindowMinutes) {
+      const ts = p.collected_at ? new Date(p.collected_at).getTime() : 0;
+      if (Date.now() - ts > f.focusWindowMinutes * 60_000) return false;
+    }
   }
   if (f.query) {
     const q = f.query.toLowerCase();
@@ -383,6 +408,9 @@ function paintFeed(): void {
   if (focus) {
     els.focusBarTerm.textContent = `"${focus}"`;
     els.focusBarCount.textContent = ` · ${visible.length} Treffer`;
+    els.focusWindowToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
+      b.classList.toggle("active", Number(b.dataset.min) === (state.filters.focusWindowMinutes ?? 0));
+    });
   }
 }
 
@@ -584,6 +612,16 @@ async function toggleTheme(): Promise<void> {
 els.btnTheme.addEventListener("click", () => void toggleTheme());
 
 els.focusBarClear.addEventListener("click", () => setFocusTerm(null));
+
+els.focusWindowToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
+  b.addEventListener("click", () => {
+    const minutes = Number(b.dataset.min) || null;
+    if (minutes === state.filters.focusWindowMinutes) return;
+    state.filters.focusWindowMinutes = minutes;
+    persistFocusWindowMinutes(minutes);
+    paintFeed();
+  });
+});
 
 // -------------------------------------------------------------- Admin-Login
 // Sichtbarkeit der Admin-Bedienelemente hängt allein von state.isAdmin ab,
@@ -793,6 +831,10 @@ const stream = new LiveStream((event, data) => {
       state.sources = data.sources;
       paintFeed();
       paintSources();
+      // Fokus kann aus sessionStorage stammen (Reload im selben Tab) - die
+      // Snapshot-Beiträge allein enthalten dann oft nicht genug Treffer,
+      // siehe hydrateFocusMatches().
+      if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
       break;
     case "posts":
       prependPosts(data as Post[]);

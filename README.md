@@ -221,6 +221,38 @@ Die Tests brauchen weder Netz noch Postgres noch Redis – SQLite und In-Memory-
 
 ---
 
+## Backups
+
+Ein eigener `backup`-Container (`docker-compose.yml`) sichert die Postgres-Datenbank automatisch:
+ein Dump sofort beim Start des Stacks, danach alle 24h (`BACKUP_INTERVAL_SECONDS`). Von den
+Dumps werden die **14 jüngsten** aufgehoben (`BACKUP_KEEP`) – bewusst mehr als einer, falls der
+neueste Dump selbst schon aus einer beschädigten Datenbank gezogen wurde.
+
+**Ablageort:** `./backups/netzwache-<UTC-Zeitstempel>.sql.gz` im Projektverzeichnis (Bind-Mount,
+liegt also direkt auf dem Host, nicht nur im Docker-Volume). Der Ordner ist in `.gitignore`.
+
+Sofortiger manueller Dump, zusätzlich zum täglichen Takt:
+
+```bash
+make backup                 # oder: docker exec netzwache-db pg_dump -U netzwache -d netzwache | gzip > backups/manual.sql.gz
+```
+
+**Wiederherstellen** (überschreibt die aktuelle Datenbank mit dem Stand aus dem Dump):
+
+```bash
+make restore FILE=backups/netzwache-20260902-030000.sql.gz
+```
+
+Das entspricht:
+
+```bash
+gunzip -c backups/netzwache-20260902-030000.sql.gz | docker exec -i netzwache-db psql -U netzwache -d netzwache
+```
+
+Läuft der Stack gerade nicht, zuerst `docker compose up -d db` (nur die Datenbank), dann restaurieren.
+
+---
+
 ## Aufbau
 
 ```

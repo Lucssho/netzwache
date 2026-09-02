@@ -28,6 +28,25 @@ services:
       timeout: 3s
       retries: 10
 
+  backup:
+    image: postgres:16-alpine
+    container_name: netzwache-backup
+    environment:
+      PGHOST: db
+      PGUSER: netzwache
+      PGPASSWORD: netzwache
+      PGDATABASE: netzwache
+      BACKUP_KEEP: 14              # wie viele Dumps aufgehoben werden
+      BACKUP_INTERVAL_SECONDS: 86400   # 24h
+    entrypoint: ["sh", "/backup.sh"]
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   backend:
     build: ./backend
     container_name: netzwache-backend

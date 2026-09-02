@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getFocusTerm, setFocusTerm } from "./focusStorage";
+import { getFocusTerm, getFocusWindowMinutes, setFocusTerm, setFocusWindowMinutes } from "./focusStorage";
 
 /** Einfache In-Memory-Storage, damit sich zwei "Sitzungen" (Tabs) unabhängig
  * voneinander simulieren lassen - echtes sessionStorage ist pro Tab isoliert,
@@ -87,5 +87,24 @@ describe("Fokus-Modus-Speicherung (sessionStorage)", () => {
     setFocusTerm(null);
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("Fokus-Zeitfenster-Speicherung (sessionStorage)", () => {
+  it("speichert und liest die Minutenauswahl zurück", () => {
+    setFocusWindowMinutes(60);
+    expect(getFocusWindowMinutes()).toBe(60);
+  });
+
+  it("löscht die Auswahl bei null ('Alle')", () => {
+    setFocusWindowMinutes(60);
+    setFocusWindowMinutes(null);
+    expect(getFocusWindowMinutes()).toBeNull();
+  });
+
+  it("übersteht einen Reload im selben Tab", () => {
+    setFocusWindowMinutes(1440);
+    expect(getFocusWindowMinutes()).toBe(1440);
+    expect(getFocusWindowMinutes()).toBe(1440);
   });
 });

@@ -80,6 +80,7 @@ export interface Filters {
   minSeverity: number;
   paused: boolean;
   focusTerm: string | null;
+  focusWindowMinutes: number | null;
 }
 
 export type FontKey = "jetbrains" | "fira" | "sfmono" | "menlo" | "consolas" | "inter" | "system";

@@ -1,4 +1,4 @@
-.PHONY: help up down logs rebuild clean test selftest dev-backend dev-frontend
+.PHONY: help up down logs rebuild clean test selftest dev-backend dev-frontend backup restore
 
 help:
 	@echo "NETZWACHE"
@@ -11,6 +11,8 @@ help:
 	@echo "  make selftest      - Quellen gegen echte Endpunkte prüfen"
 	@echo "  make dev-backend   - Backend lokal mit SQLite (Port 8000)"
 	@echo "  make dev-frontend  - Vite-Dev-Server (Port 5173)"
+	@echo "  make backup        - sofortiger DB-Dump nach ./backups (zusätzlich zum täglichen Auto-Backup)"
+	@echo "  make restore FILE=backups/netzwache-....sql.gz - DB aus einem Dump wiederherstellen"
 
 up:
 	@test -f .env || cp .env.example .env
@@ -40,3 +42,12 @@ dev-backend:
 
 dev-frontend:
 	cd frontend && npm run dev
+
+backup:
+	@mkdir -p backups
+	docker exec netzwache-db pg_dump -U netzwache -d netzwache | gzip > backups/netzwache-$$(date -u +%Y%m%d-%H%M%S)-manual.sql.gz
+	@echo "Backup geschrieben nach ./backups/"
+
+restore:
+	@test -n "$(FILE)" || { echo "Nutzung: make restore FILE=backups/netzwache-....sql.gz"; exit 1; }
+	gunzip -c $(FILE) | docker exec -i netzwache-db psql -U netzwache -d netzwache

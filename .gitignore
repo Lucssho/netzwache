@@ -12,6 +12,9 @@ venv/
 *.db
 *.sqlite3
 
+# Datenbank-Backups (siehe backup/backup.sh)
+/backups/
+
 # Node / Vite
 node_modules/
 dist/

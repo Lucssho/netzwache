@@ -9,6 +9,7 @@
  */
 
 const KEY = "netzwache.focusTerm";
+const WINDOW_KEY = "netzwache.focusWindowMinutes";
 
 export function getFocusTerm(): string | null {
   try {
@@ -24,5 +25,26 @@ export function setFocusTerm(term: string | null): void {
     else sessionStorage.removeItem(KEY);
   } catch {
     /* Storage nicht verfügbar - Fokus bleibt dann nur In-Memory */
+  }
+}
+
+// Zeitfenster (in Minuten) für die Fokus-Leiste - genau wie der Fokus-Begriff
+// selbst pro Tab und über einen Reload hinweg gemerkt, damit man nach dem
+// Neuladen nicht wieder durch alle 200 gepufferten Treffer scrollen muss.
+export function getFocusWindowMinutes(): number | null {
+  try {
+    const raw = sessionStorage.getItem(WINDOW_KEY);
+    return raw ? Number(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setFocusWindowMinutes(minutes: number | null): void {
+  try {
+    if (minutes) sessionStorage.setItem(WINDOW_KEY, String(minutes));
+    else sessionStorage.removeItem(WINDOW_KEY);
+  } catch {
+    /* Storage nicht verfügbar - Zeitfenster bleibt dann nur In-Memory */
   }
 }
