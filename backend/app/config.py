@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     user_agent: str = "netzwache/1.0 (open-source OSINT dashboard; +https://localhost)"
     max_items_per_run: int = 50
     retention_days: int = 30        # Posts älter als X Tage werden aufgeräumt
+    cleanup_interval_seconds: int = 24 * 60 * 60  # wie oft die Retention-Räumung automatisch läuft
+    max_posts: int = 10000          # harte Obergrenze - älteste Posts fallen zuerst raus
 
     # --- Intervalle je Quelle (Sekunden, respektiert Rate-Limits) -------
     interval_bluesky: int = 300

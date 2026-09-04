@@ -221,6 +221,25 @@ Die Tests brauchen weder Netz noch Postgres noch Redis – SQLite und In-Memory-
 
 ---
 
+## Speicherbegrenzung
+
+Zwei automatische, voneinander unabhängige Räumungen laufen im Scheduler mit, keine davon
+braucht einen manuellen Aufruf:
+
+* **`MAX_POSTS`** (Standard 10000): harte Obergrenze für die `posts`-Tabelle. Nach jedem
+  Sammel-Lauf, der neue Beiträge gespeichert hat, prüft der Scheduler die Gesamtzahl - wird die
+  Grenze überschritten, fallen die ältesten Beiträge (nach `collected_at`) sofort raus, bis das
+  Limit wieder eingehalten ist.
+* **`RETENTION_DAYS`** (Standard 30) + **`CLEANUP_INTERVAL_SECONDS`** (Standard 86400 = 24h):
+  zeitbasierte Räumung - alle X Sekunden werden Posts gelöscht, die älter als `RETENTION_DAYS`
+  sind (nach `collected_at`), zusammen mit Log-Einträgen älter als 3 Tage. Läuft erstmals sofort
+  beim Start des Backends, danach im konfigurierten Takt.
+
+`POST /api/maintenance/cleanup` (Admin) stößt dieselbe zeitbasierte Räumung zusätzlich manuell an,
+z.B. um nicht auf den nächsten automatischen Lauf zu warten.
+
+---
+
 ## Backups
 
 Ein eigener `backup`-Container (`docker-compose.yml`) sichert die Postgres-Datenbank automatisch:

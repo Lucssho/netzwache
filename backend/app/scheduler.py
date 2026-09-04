@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from .collectors import COLLECTOR_CLASSES, BaseCollector, CollectorError, RawItem
 from .config import settings
@@ -36,6 +36,7 @@ class Engine:
         self.started_at = datetime.now(timezone.utc)
         self.tick_count = 0
         self.collected_session = 0
+        self._last_cleanup: float | None = None
 
     # ------------------------------------------------------------------
     async def start(self) -> None:
@@ -122,6 +123,7 @@ class Engine:
         async with self._lock:
             self.tick_count += 1
             now = time.monotonic()
+            await self._maybe_cleanup(now)
             terms_rows = await self._active_terms()
             all_terms = [t.term for t in terms_rows]
 
@@ -159,6 +161,21 @@ class Engine:
             )
             return {"ran": due, "new": total_new}
 
+    async def _maybe_cleanup(self, now: float) -> None:
+        """Retention-Räumung (settings.retention_days) automatisch im Takt von
+        settings.cleanup_interval_seconds - lief vorher nur, wenn jemand
+        manuell POST /api/maintenance/cleanup aufgerufen hat. Läuft beim
+        allerersten Tick sofort (self._last_cleanup ist noch None), danach im
+        konfigurierten Intervall."""
+        if self._last_cleanup is not None and (now - self._last_cleanup) < settings.cleanup_interval_seconds:
+            return
+        self._last_cleanup = now
+        removed = await self.cleanup()
+        if removed:
+            await self._log(
+                "info", "core", f"{removed} Beiträge älter als {settings.retention_days} Tage entfernt"
+            )
+
     # ------------------------------------------------------------------
     async def _run_collector(self, name: str, terms: list[str]) -> int:
         col = self.collectors[name]
@@ -183,7 +200,29 @@ class Engine:
             await self._log(
                 "info", name, f"{len(stored)} neue Beiträge ({len(items)} geprüft)"
             )
+            await self._enforce_post_cap()
         return len(stored)
+
+    async def _enforce_post_cap(self) -> None:
+        """Harte Obergrenze (settings.max_posts): wird sie überschritten,
+        fallen die ältesten Posts (nach collected_at) zuerst raus - unabhängig
+        von retention_days, das nur zeitbasiert aufräumt und ohnehin nicht
+        automatisch läuft."""
+        if not settings.max_posts:
+            return
+        async with SessionLocal() as s:
+            total = (await s.execute(select(func.count(Post.id)))).scalar_one()
+            overflow = total - settings.max_posts
+            if overflow <= 0:
+                return
+            oldest_ids = select(Post.id).order_by(Post.collected_at.asc()).limit(overflow)
+            res = await s.execute(delete(Post).where(Post.id.in_(oldest_ids)))
+            await s.commit()
+            removed = res.rowcount or 0
+        if removed:
+            await self._log(
+                "info", "core", f"{removed} älteste Beiträge entfernt (Limit {settings.max_posts})"
+            )
 
     async def _store(self, items: list[RawItem], terms: list[str]) -> list[dict]:
         """Dedupliziert, reichert an und schreibt in die DB."""

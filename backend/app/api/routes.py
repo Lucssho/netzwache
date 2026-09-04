@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import is_admin, require_admin, verify_admin_credentials
 from ..collectors import COLLECTOR_CLASSES
 from ..config import settings
-from ..db import get_session
+from ..db import engine as db_engine, get_session
 from ..dedup import dedup
+from ..db_json import json_array_contains, json_array_top_counts
 from ..enrich import CATEGORIES
 from ..hub import hub
 from ..models import EventLog, Post, SearchTerm, SourceState, UiSetting
@@ -97,6 +98,7 @@ async def list_posts(
     limit: int = Query(60, ge=1, le=500),
     offset: int = Query(0, ge=0),
     platform: str | None = None,
+    source: str | None = None,
     category: str | None = None,
     q: str | None = None,
     min_severity: int = Query(0, ge=0, le=100),
@@ -109,6 +111,10 @@ async def list_posts(
     def apply(s):
         if platform and platform != "all":
             s = s.where(Post.platform == platform)
+        if source:
+            s = s.where(Post.source == source)
+        if category and category != "all":
+            s = s.where(json_array_contains(db_engine.dialect, "categories", category))
         if q:
             like = f"%{q.lower()}%"
             s = s.where(
@@ -121,16 +127,15 @@ async def list_posts(
             s = s.where(Post.collected_at >= cutoff)
         return s
 
+    # Dieselben Filter (inkl. category) für items UND total - sonst zeigt
+    # total die ungefilterte/teilgefilterte Zahl an, während items bereits
+    # vollständig gefiltert sind.
     stmt, count_stmt = apply(stmt), apply(count_stmt)
     rows = (
-        await session.execute(
-            stmt.order_by(desc(Post.collected_at)).limit(limit * 3 if category else limit).offset(offset)
-        )
+        await session.execute(stmt.order_by(desc(Post.collected_at)).limit(limit).offset(offset))
     ).scalars().all()
 
     items = [r.to_dict() for r in rows]
-    if category and category != "all":
-        items = [i for i in items if category in (i["categories"] or [])][:limit]
     total = (await session.execute(count_stmt)).scalar() or 0
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
@@ -169,27 +174,22 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict:
         )
     ).scalar() or 0
 
-    recent = (
-        await session.execute(
-            select(Post.categories, Post.cve_ids, Post.keywords, Post.severity)
-            .order_by(desc(Post.collected_at))
-            .limit(600)
-        )
-    ).all()
+    # Über die gesamte Tabelle aggregiert (nicht nur die letzten N Posts) -
+    # GROUP BY/COUNT laufen komplett in der Datenbank, siehe db_json.py.
+    dialect = db_engine.dialect
+    category_counts = dict(
+        await json_array_top_counts(session, dialect, "categories", limit=len(CATEGORIES) + 5)
+    )
+    by_category = {c: category_counts.get(c, 0) for c in CATEGORIES}
 
-    by_category = {c: 0 for c in CATEGORIES}
-    keyword_counts: dict[str, int] = {}
-    cves: dict[str, int] = {}
-    high_sev = 0
-    for cats, cve_list, kws, sev in recent:
-        for c in cats or []:
-            by_category[c] = by_category.get(c, 0) + 1
-        for k in (kws or [])[:5]:
-            keyword_counts[k] = keyword_counts.get(k, 0) + 1
-        for c in cve_list or []:
-            cves[c] = cves.get(c, 0) + 1
-        if (sev or 0) >= 40:
-            high_sev += 1
+    top_keywords = await json_array_top_counts(
+        session, dialect, "keywords", limit=14, max_per_row=5
+    )
+    top_cves = await json_array_top_counts(session, dialect, "cve_ids", limit=10)
+
+    high_sev = (
+        await session.execute(select(func.count(Post.id)).where(Post.severity >= 40))
+    ).scalar() or 0
 
     # Zeitreihe: Posts pro Minute (letzte 30 Minuten)
     series_rows = (
@@ -213,8 +213,8 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict:
         "last_5min": last_5min,
         "per_minute": round(last_hour / 60, 2),
         "high_severity": high_sev,
-        "top_keywords": sorted(keyword_counts.items(), key=lambda x: -x[1])[:14],
-        "top_cves": sorted(cves.items(), key=lambda x: -x[1])[:10],
+        "top_keywords": top_keywords,
+        "top_cves": top_cves,
         "series": buckets,
         "uptime_seconds": round(engine.uptime_seconds, 1),
         "ticks": engine.tick_count,

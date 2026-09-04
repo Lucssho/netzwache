@@ -83,3 +83,28 @@ async def test_posts_are_stored_deduplicated_and_filterable(app_client, seed_pos
     stats = (await app_client.get("/api/stats")).json()
     assert stats["total"] == 3
     assert stats["by_platform"]["bluesky"] == 1
+
+
+@pytest.mark.asyncio
+async def test_posts_source_filter_and_accurate_category_total(app_client, seed_posts):
+    """source ist eine eigene Spalte (z.B. "r/linux"), unabhängig von
+    platform. Und: total muss zum category-gefilterten Ergebnis passen -
+    vorher ignorierte total den category-Filter komplett und zeigte die
+    Zahl aus platform/q/min_severity/since_minutes an."""
+    await seed_posts()
+
+    # q= grenzt zusätzlich auf die Posts dieses Tests ein, damit die Zahlen
+    # unabhängig von Daten aus anderen Tests in derselben (session-weiten) DB sind.
+    only_linux_sub = (await app_client.get("/api/posts?source=r/linux&q=kernel")).json()
+    assert only_linux_sub["total"] == 1
+    assert only_linux_sub["items"][0]["source"] == "r/linux"
+
+    no_match = (await app_client.get("/api/posts?source=r/does-not-exist&q=kernel")).json()
+    assert no_match["total"] == 0
+    assert no_match["items"] == []
+
+    cyber = (await app_client.get("/api/posts?category=cybersecurity&q=ransomware")).json()
+    assert cyber["total"] == len(cyber["items"]) == 1
+
+    other_cat = (await app_client.get("/api/posts?category=it&q=ransomware")).json()
+    assert other_cat["total"] == 0, "der Ransomware-Post ist nicht als 'it' kategorisiert"
