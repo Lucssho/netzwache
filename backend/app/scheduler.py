@@ -20,7 +20,8 @@ from .db import SessionLocal
 from .dedup import dedup
 from .enrich import content_hash, enrich, normalize, text_fingerprint
 from .hub import hub
-from .models import EventLog, Post, SearchTerm, SourceState
+from .models import EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState
+from .seed import seed_categories
 
 log = logging.getLogger("netzwache.scheduler")
 
@@ -37,6 +38,7 @@ class Engine:
         self.tick_count = 0
         self.collected_session = 0
         self._last_cleanup: float | None = None
+        self._category_ids: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     async def start(self) -> None:
@@ -47,6 +49,7 @@ class Engine:
         )
         self.collectors = {c.name: c(self.client) for c in COLLECTOR_CLASSES}
         await self._sync_source_state()
+        self._category_ids = await seed_categories()
         self._running = True
         self._task = asyncio.create_task(self._loop(), name="netzwache-engine")
         log.info("Engine gestartet: %s Collector, Tick %ss",
@@ -264,6 +267,15 @@ class Engine:
                 savepoint = await s.begin_nested()
                 s.add(post)
                 try:
+                    await s.flush()  # post.id wird gebraucht, um die Zuordnungen zu verknüpfen
+                    for cat_name in meta["categories"]:
+                        cat_id = self._category_ids.get(cat_name)
+                        if cat_id is not None:
+                            s.add(PostCategory(post_id=post.id, category_id=cat_id))
+                    for term in meta["matched_terms"]:
+                        s.add(PostTag(post_id=post.id, tag=term))
+                    for cve in meta["cve_ids"]:
+                        s.add(PostCve(post_id=post.id, cve=cve))
                     await s.flush()
                     await savepoint.commit()
                 except Exception as exc:

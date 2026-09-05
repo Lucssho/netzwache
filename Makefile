@@ -1,4 +1,4 @@
-.PHONY: help up down logs rebuild clean test selftest dev-backend dev-frontend backup restore
+.PHONY: help up down logs rebuild clean test selftest dev-backend dev-frontend backup restore migrate-normalize
 
 help:
 	@echo "NETZWACHE"
@@ -13,6 +13,7 @@ help:
 	@echo "  make dev-frontend  - Vite-Dev-Server (Port 5173)"
 	@echo "  make backup        - sofortiger DB-Dump nach ./backups (zusätzlich zum täglichen Auto-Backup)"
 	@echo "  make restore FILE=backups/netzwache-....sql.gz - DB aus einem Dump wiederherstellen"
+	@echo "  make migrate-normalize - bestehende Posts in post_categories/post_tags nachtragen (einmalig, idempotent)"
 
 up:
 	@test -f .env || cp .env.example .env
@@ -51,3 +52,6 @@ backup:
 restore:
 	@test -n "$(FILE)" || { echo "Nutzung: make restore FILE=backups/netzwache-....sql.gz"; exit 1; }
 	gunzip -c $(FILE) | docker exec -i netzwache-db psql -U netzwache -d netzwache
+
+migrate-normalize:
+	docker exec netzwache-backend python -m app.migrate_normalize

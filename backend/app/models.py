@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     Integer,
     JSON,
@@ -35,6 +36,8 @@ class Post(Base):
         Index("ix_posts_created_at", "created_at"),
         Index("ix_posts_platform", "platform"),
         Index("ix_posts_content_hash", "content_hash", unique=True),
+        Index("ix_posts_source", "source"),
+        Index("ix_posts_severity", "severity"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -82,6 +85,54 @@ class Post(Base):
             "severity": self.severity,
             "engagement": self.engagement or {},
         }
+
+
+class Category(Base):
+    """Feste Kategorien (cybersecurity/it/nachrichten/alltag) als echte
+    Tabelle statt nur als String in der categories-JSON-Spalte auf Post."""
+
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(32), unique=True)
+
+
+class PostCategory(Base):
+    """Normalisierte Post<->Kategorie-Zuordnung (m:n) - erlaubt ein
+    echtes WHERE/JOIN über category_id statt einer JSON-Array-Suche.
+    Die categories-JSON-Spalte auf Post bleibt zusätzlich bestehen, weil
+    das Feed sie ohne einen weiteren Join direkt anzeigen kann."""
+
+    __tablename__ = "post_categories"
+    __table_args__ = (Index("ix_post_categories_category_id", "category_id"),)
+
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"), primary_key=True)
+
+
+class PostTag(Base):
+    """Normalisierte Suchbegriff-Treffer eines Posts (das, was im Feed als
+    „match: …" angezeigt wird) - ermöglicht WHERE tag = 'linux' statt einer
+    JSON-Array-Suche über matched_terms. matched_terms auf Post bleibt
+    zusätzlich für die Anzeige im Feed erhalten."""
+
+    __tablename__ = "post_tags"
+    __table_args__ = (Index("ix_post_tags_tag", "tag"),)
+
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    tag: Mapped[str] = mapped_column(String(200), primary_key=True)
+
+
+class PostCve(Base):
+    """Normalisierte CVE-Treffer eines Posts - ermöglicht WHERE cve = 'CVE-...'
+    statt einer JSON-Array-Suche über cve_ids, und ein echtes GROUP BY für
+    top_cves. cve_ids auf Post bleibt zusätzlich für die Anzeige im Feed."""
+
+    __tablename__ = "post_cves"
+    __table_args__ = (Index("ix_post_cves_cve", "cve"),)
+
+    post_id: Mapped[int] = mapped_column(ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
+    cve: Mapped[str] = mapped_column(String(32), primary_key=True)
 
 
 class SearchTerm(Base):

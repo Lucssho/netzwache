@@ -168,7 +168,7 @@ sobald die passende Variable in der `.env` steht. Bis dahin melden sie sauber
 |---------|------|-------|
 | `GET` | `/api/health` | Laufzeit, Ticks, Dedup-Backend, WS-Clients |
 | `GET` | `/api/meta` | registrierte Collector + Einrichtungshinweise |
-| `GET` | `/api/posts` | Beiträge; Filter: `platform`, `category`, `q`, `min_severity`, `since_minutes` |
+| `GET` | `/api/posts` | Beiträge; Filter: `platform`, `source`, `category`, `tag`, `cve`, `q`, `min_severity`, `since_minutes` |
 | `GET` | `/api/stats` | Kennzahlen, Zeitreihe, Top-Keywords, CVE-Watch |
 | `GET` | `/api/sources` | Status aller Quellen |
 | `PATCH` | `/api/sources/{name}` | Quelle an/aus, Intervall ändern |
@@ -218,6 +218,50 @@ python -m pytest            # 26 Tests: Anreicherung, alle Collector (gemockt), 
 ```
 
 Die Tests brauchen weder Netz noch Postgres noch Redis – SQLite und In-Memory-Dedup springen ein.
+
+---
+
+## Datenmodell: Kategorien, Tags & CVEs
+
+`categories`, `matched_terms` und `cve_ids` liegen weiterhin als JSON-Spalten auf `posts`
+(für die Feed-Anzeige ohne zusätzlichen Join), zusätzlich aber auch normalisiert:
+
+* **`categories`** (feste 4 Werte: cybersecurity/it/nachrichten/alltag) + **`post_categories`**
+  (m:n, `post_id` + `category_id`)
+* **`post_tags`** (`post_id` + `tag`, z.B. `"linux"`) - der Suchbegriff, den ein Post
+  getroffen hat
+* **`post_cves`** (`post_id` + `cve`, z.B. `"CVE-2026-83548"`)
+
+`GET /api/posts?category=cybersecurity`, `?tag=linux` und `?cve=CVE-2026-83548` filtern über
+einen echten `JOIN`, nicht über eine JSON-Array-Suche - lassen sich beliebig mit
+`platform`/`source` kombinieren, z.B. `?platform=reddit&tag=linux`. `/api/stats.by_category`
+und `top_cves` sind entsprechend ein einfaches `GROUP BY` über die jeweilige Tabelle.
+`keywords` bleibt bewusst nur JSON (offenes Vokabular, siehe `db_json.py`).
+
+Bestehende Posts (vor dieser Umstellung gesammelt) einmalig nachtragen:
+
+```bash
+make migrate-normalize       # oder: docker exec netzwache-backend python -m app.migrate_normalize
+```
+
+Idempotent - kann gefahrlos mehrfach laufen, überspringt bereits migrierte Zeilen.
+
+---
+
+## Indizes & Volltextsuche
+
+`source` und `severity` sind jetzt indiziert (`ix_posts_source`, `ix_posts_severity`) - beide
+werden von `/api/posts` gefiltert, liefen vorher aber als vollständiger Tabellenscan.
+
+`?q=` nutzt auf Postgres echte Volltextsuche statt `LIKE '%...%'`: eine generierte
+`search_vector`-Spalte (`tsvector` über `title`+`text`, deutsche Sprachkonfiguration) mit
+GIN-Index, abgefragt über `websearch_to_tsquery` (versteht `"Wortgruppen"` und `-ausschluss`).
+Die Spalte pflegt sich selbst - kein Anwendungscode schreibt sie. SQLite (Dev/Tests) hat keine
+Entsprechung und bleibt beim bisherigen `LIKE`-Fallback (siehe `db_json.py`).
+
+Sowohl die Indizes als auch die `search_vector`-Spalte werden beim Start automatisch angelegt
+(`init_db()`, `CREATE INDEX IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`) - kein separater
+Migrationsschritt nötig, das läuft auch auf der schon existierenden `posts`-Tabelle nach.
 
 ---
 
@@ -282,9 +326,11 @@ netzwache/
 │   ├── app/
 │   │   ├── main.py             FastAPI-App, Lifespan, WebSocket
 │   │   ├── config.py           Einstellungen aus .env
-│   │   ├── models.py           Post, SearchTerm, SourceState, EventLog
+│   │   ├── models.py           Post, Category, PostCategory, PostTag, PostCve, SearchTerm, SourceState, EventLog
 │   │   ├── scheduler.py        10s-Takt, Rate-Limits, Speichern, Broadcast
 │   │   ├── enrich.py           Kategorien, CVE, Severity, Keywords
+│   │   ├── db_json.py          Dialektabhängige Suche in offenen JSON-Spalten (keywords, cve_ids)
+│   │   ├── migrate_normalize.py  Einmalige Migration: post_categories/post_tags/post_cves aus Bestandsdaten befüllen
 │   │   ├── dedup.py            Redis-Dedup mit Memory-Fallback
 │   │   ├── hub.py              WebSocket-Broadcast
 │   │   ├── selftest.py         Quellen einzeln gegen echte Endpunkte prüfen

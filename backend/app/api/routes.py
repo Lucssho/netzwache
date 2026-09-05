@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import delete, desc, func, or_, select, text, update
+from sqlalchemy import delete, desc, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import is_admin, require_admin, verify_admin_credentials
@@ -12,10 +12,10 @@ from ..collectors import COLLECTOR_CLASSES
 from ..config import settings
 from ..db import engine as db_engine, get_session
 from ..dedup import dedup
-from ..db_json import json_array_contains, json_array_top_counts
+from ..db_json import json_array_top_counts, text_search_clause
 from ..enrich import CATEGORIES
 from ..hub import hub
-from ..models import EventLog, Post, SearchTerm, SourceState, UiSetting
+from ..models import Category, EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState, UiSetting
 from ..scheduler import engine
 from ..schemas import AdminLogin, SettingsPatch, SourcePatch, TermIn, TermPatch
 
@@ -100,6 +100,8 @@ async def list_posts(
     platform: str | None = None,
     source: str | None = None,
     category: str | None = None,
+    tag: str | None = None,
+    cve: str | None = None,
     q: str | None = None,
     min_severity: int = Query(0, ge=0, le=100),
     since_minutes: int | None = Query(None, ge=1, le=60 * 24 * 30),
@@ -114,12 +116,21 @@ async def list_posts(
         if source:
             s = s.where(Post.source == source)
         if category and category != "all":
-            s = s.where(json_array_contains(db_engine.dialect, "categories", category))
-        if q:
-            like = f"%{q.lower()}%"
-            s = s.where(
-                or_(func.lower(Post.text).like(like), func.lower(Post.title).like(like))
+            # Normalisierter Join statt JSON-Array-Suche - siehe post_categories/Category.
+            s = (
+                s.join(PostCategory, PostCategory.post_id == Post.id)
+                .join(Category, Category.id == PostCategory.category_id)
+                .where(Category.name == category)
             )
+        if tag:
+            # z.B. "linux" - der Suchbegriff, den der Post getroffen hat.
+            s = s.join(PostTag, PostTag.post_id == Post.id).where(PostTag.tag == tag)
+        if cve:
+            s = s.join(PostCve, PostCve.post_id == Post.id).where(PostCve.cve == cve.upper())
+        if q:
+            # Postgres: echte Volltextsuche über den tsvector-Index.
+            # SQLite: LIKE-Fallback (siehe db_json.py).
+            s = s.where(text_search_clause(db_engine.dialect, q))
         if min_severity:
             s = s.where(Post.severity >= min_severity)
         if since_minutes:
@@ -174,18 +185,37 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict:
         )
     ).scalar() or 0
 
-    # Über die gesamte Tabelle aggregiert (nicht nur die letzten N Posts) -
-    # GROUP BY/COUNT laufen komplett in der Datenbank, siehe db_json.py.
-    dialect = db_engine.dialect
+    # by_category/top_cves: echtes GROUP BY über die normalisierten
+    # post_categories/post_cves-Tabellen (kein JSON-Array-Unnesting nötig).
+    # top_keywords bleibt offenes Vokabular ohne eigene Tabelle und läuft
+    # weiter über db_json.py.
     category_counts = dict(
-        await json_array_top_counts(session, dialect, "categories", limit=len(CATEGORIES) + 5)
+        (
+            await session.execute(
+                select(Category.name, func.count(PostCategory.post_id))
+                .join(PostCategory, PostCategory.category_id == Category.id)
+                .group_by(Category.name)
+            )
+        ).all()
     )
     by_category = {c: category_counts.get(c, 0) for c in CATEGORIES}
 
+    top_cves = [
+        (c, n)
+        for c, n in (
+            await session.execute(
+                select(PostCve.cve, func.count(PostCve.post_id))
+                .group_by(PostCve.cve)
+                .order_by(desc(func.count(PostCve.post_id)))
+                .limit(10)
+            )
+        ).all()
+    ]
+
+    dialect = db_engine.dialect
     top_keywords = await json_array_top_counts(
         session, dialect, "keywords", limit=14, max_per_row=5
     )
-    top_cves = await json_array_top_counts(session, dialect, "cve_ids", limit=10)
 
     high_sev = (
         await session.execute(select(func.count(Post.id)).where(Post.severity >= 40))
