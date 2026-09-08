@@ -54,6 +54,8 @@ export interface Stats {
   total: number;
   by_platform: Record<string, number>;
   by_category: Record<string, number>;
+  tab_platform_counts: Record<string, number>;
+  tab_category_counts: Record<string, number>;
   last_hour: number;
   last_5min: number;
   per_minute: number;
@@ -92,5 +94,17 @@ export interface UiSettings {
   density: Density;
   theme: string;
   [key: string]: string;
+}
+
+export interface StorageInfo {
+  max_posts_size_gb: number;
+  posts_trim_chunk_mb: number;
+  min_size_gb: number;
+  max_size_gb: number;
+  min_chunk_mb: number;
+  max_chunk_mb: number;
+  current_size_bytes: number | null;
+  post_count: number;
+  size_tracking_available: boolean;
 }
 

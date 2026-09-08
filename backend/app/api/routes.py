@@ -17,7 +17,7 @@ from ..enrich import CATEGORIES
 from ..hub import hub
 from ..models import Category, EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState, UiSetting
 from ..scheduler import engine
-from ..schemas import AdminLogin, SettingsPatch, SourcePatch, TermIn, TermPatch
+from ..schemas import AdminLogin, DeleteAllPostsConfirm, SettingsPatch, SourcePatch, TermIn, TermPatch
 
 router = APIRouter(prefix="/api")
 
@@ -26,7 +26,15 @@ DEFAULT_UI_SETTINGS: dict[str, str] = {
     "font_size": "13",            # px, 11..18
     "density": "comfortable",     # compact | comfortable | relaxed
     "theme": "dark",               # dark | light
+    # Speicher-Limits: aus .env vorbefüllt, per PUT /api/settings überschreibbar
+    # (siehe scheduler.py::_effective_size_limits) - so wirkt eine Änderung
+    # sofort, ohne Neustart des Backends.
+    "max_posts_size_gb": str(settings.max_posts_size_gb),
+    "posts_trim_chunk_mb": str(settings.posts_trim_chunk_mb),
 }
+
+MIN_SIZE_GB, MAX_SIZE_GB = 5.0, 100.0
+MIN_CHUNK_MB, MAX_CHUNK_MB = 10.0, 5120.0  # 5120 MB = 5 GB
 
 
 def _mask(value: str, keep: int = 3) -> str | None:
@@ -161,7 +169,11 @@ async def get_post(post_id: int, session: AsyncSession = Depends(get_session)) -
 
 # ----------------------------------------------------------------- Stats
 @router.get("/stats")
-async def stats(session: AsyncSession = Depends(get_session)) -> dict:
+async def stats(
+    platform: str | None = None,
+    category: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
     total = (await session.execute(select(func.count(Post.id)))).scalar() or 0
 
     by_platform = {
@@ -199,6 +211,32 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict:
         ).all()
     )
     by_category = {c: category_counts.get(c, 0) for c in CATEGORIES}
+
+    # Für die Filter-Reiter (nicht das Lagebild-Widget oben, das bewusst
+    # global bleibt): wie viele Treffer ein Wechsel auf diesen Reiter
+    # UNTER BERÜCKSICHTIGUNG des jeweils anderen aktiven Filters ergäbe -
+    # sonst zeigt z.B. der Reddit-Reiter "896" (global), obwohl bei aktivem
+    # category-Filter tatsächlich nur 437 sichtbar wären.
+    platform_tab_stmt = select(Post.platform, func.count(Post.id)).group_by(Post.platform)
+    if category and category != "all":
+        platform_tab_stmt = (
+            platform_tab_stmt.join(PostCategory, PostCategory.post_id == Post.id)
+            .join(Category, Category.id == PostCategory.category_id)
+            .where(Category.name == category)
+        )
+    tab_platform_counts = dict((await session.execute(platform_tab_stmt)).all())
+
+    category_tab_stmt = (
+        select(Category.name, func.count(PostCategory.post_id))
+        .join(PostCategory, PostCategory.category_id == Category.id)
+        .group_by(Category.name)
+    )
+    if platform and platform != "all":
+        category_tab_stmt = category_tab_stmt.join(
+            Post, Post.id == PostCategory.post_id
+        ).where(Post.platform == platform)
+    category_tab_counts = dict((await session.execute(category_tab_stmt)).all())
+    tab_category_counts = {c: category_tab_counts.get(c, 0) for c in CATEGORIES}
 
     top_cves = [
         (c, n)
@@ -239,6 +277,8 @@ async def stats(session: AsyncSession = Depends(get_session)) -> dict:
         "total": total,
         "by_platform": by_platform,
         "by_category": by_category,
+        "tab_platform_counts": tab_platform_counts,
+        "tab_category_counts": tab_category_counts,
         "last_hour": last_hour,
         "last_5min": last_5min,
         "per_minute": round(last_hour / 60, 2),
@@ -368,6 +408,51 @@ async def cleanup() -> dict:
     return {"removed": removed, "retention_days": settings.retention_days}
 
 
+@router.post("/maintenance/delete-all-posts", dependencies=[Depends(require_admin)])
+async def delete_all_posts(
+    body: DeleteAllPostsConfirm, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Löscht ALLE Beiträge (post_categories/post_tags/post_cves fallen per
+    ON DELETE CASCADE mit weg). Suchbegriffe, Quellen-Status und
+    Einstellungen bleiben unberührt - die Sammlung läuft direkt danach
+    weiter. Erfordert ein exaktes Bestätigungswort (siehe schemas.py),
+    zusätzlich zur Bestätigung im Frontend."""
+    res = await session.execute(delete(Post))
+    await session.commit()
+    removed = res.rowcount or 0
+    await engine._log("info", "core", f"Alle Beiträge gelöscht ({removed})")
+    await hub.broadcast("posts_cleared", {"removed": removed})
+    return {"removed": removed}
+
+
+@router.get("/settings/storage")
+async def storage_settings(session: AsyncSession = Depends(get_session)) -> dict:
+    """Aktuelle Speicher-Limits (aus ui_settings, mit .env-Fallback) plus die
+    tatsächliche Größe der posts-Tabelle - für die Admin-Anzeige, wie viel
+    von den erlaubten GB schon belegt sind."""
+    max_gb, chunk_mb = await engine._effective_size_limits(session)
+
+    size_bytes: int | None = None
+    if db_engine.dialect.name != "sqlite":
+        size_bytes = (
+            await session.execute(text("SELECT pg_total_relation_size('posts')"))
+        ).scalar()
+
+    post_count = (await session.execute(select(func.count(Post.id)))).scalar() or 0
+
+    return {
+        "max_posts_size_gb": max_gb,
+        "posts_trim_chunk_mb": chunk_mb,
+        "min_size_gb": MIN_SIZE_GB,
+        "max_size_gb": MAX_SIZE_GB,
+        "min_chunk_mb": MIN_CHUNK_MB,
+        "max_chunk_mb": MAX_CHUNK_MB,
+        "current_size_bytes": size_bytes,
+        "post_count": post_count,
+        "size_tracking_available": db_engine.dialect.name != "sqlite",
+    }
+
+
 # ------------------------------------------------------------ Darstellung
 @router.get("/settings")
 async def get_ui_settings(session: AsyncSession = Depends(get_session)) -> dict:
@@ -376,11 +461,31 @@ async def get_ui_settings(session: AsyncSession = Depends(get_session)) -> dict:
     return values
 
 
+def _validate_storage_setting(key: str, value: str) -> None:
+    """Serverseitige Bereichsprüfung für die beiden Speicher-Limit-Felder -
+    SettingsPatch selbst ist bewusst generisch (freies Key-Value), diese
+    zwei Schlüssel bekommen trotzdem feste Grenzen (siehe routes.py-Konstanten)."""
+    bounds = {
+        "max_posts_size_gb": (MIN_SIZE_GB, MAX_SIZE_GB, "GB"),
+        "posts_trim_chunk_mb": (MIN_CHUNK_MB, MAX_CHUNK_MB, "MB"),
+    }
+    if key not in bounds:
+        return
+    lo, hi, unit = bounds[key]
+    try:
+        num = float(value)
+    except ValueError:
+        raise HTTPException(400, f"{key} muss eine Zahl sein")
+    if not (lo <= num <= hi):
+        raise HTTPException(400, f"{key} muss zwischen {lo:g} und {hi:g} {unit} liegen")
+
+
 @router.put("/settings", dependencies=[Depends(require_admin)])
 async def put_ui_settings(
     patch: SettingsPatch, session: AsyncSession = Depends(get_session)
 ) -> dict:
     for key, value in patch.values.items():
+        _validate_storage_setting(key, value)
         existing = await session.get(UiSetting, key)
         if existing:
             existing.value = value

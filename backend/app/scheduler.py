@@ -8,19 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from .collectors import COLLECTOR_CLASSES, BaseCollector, CollectorError, RawItem
 from .config import settings
 from .db import SessionLocal
+from .db import engine as db_engine
 from .dedup import dedup
 from .enrich import content_hash, enrich, normalize, text_fingerprint
 from .hub import hub
-from .models import EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState
+from .models import EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState, UiSetting
 from .seed import seed_categories
 
 log = logging.getLogger("netzwache.scheduler")
@@ -203,8 +205,18 @@ class Engine:
             await self._log(
                 "info", name, f"{len(stored)} neue Beiträge ({len(items)} geprüft)"
             )
-            await self._enforce_post_cap()
+            await self._enforce_storage_limits()
         return len(stored)
+
+    async def _enforce_storage_limits(self) -> None:
+        """Postgres (Produktion): Größenlimit (settings.max_posts_size_gb) -
+        SQLite (Dev/Tests) kennt kein pg_total_relation_size und bleibt beim
+        einfacheren Zeilen-Limit (settings.max_posts), das für die dortigen
+        Datenmengen ohnehin ausreicht."""
+        if db_engine.dialect.name == "sqlite":
+            await self._enforce_post_cap()
+        else:
+            await self._enforce_size_cap()
 
     async def _enforce_post_cap(self) -> None:
         """Harte Obergrenze (settings.max_posts): wird sie überschritten,
@@ -225,6 +237,74 @@ class Engine:
         if removed:
             await self._log(
                 "info", "core", f"{removed} älteste Beiträge entfernt (Limit {settings.max_posts})"
+            )
+
+    async def _effective_size_limits(self, s) -> tuple[float, float]:
+        """Liest max_posts_size_gb/posts_trim_chunk_mb aus ui_settings (per
+        PUT /api/settings admin-änderbar, wirkt sofort ohne Neustart) - fällt
+        auf die .env-Werte zurück, solange niemand sie über die Oberfläche
+        geändert hat."""
+        rows = {
+            r.key: r.value
+            for r in (
+                await s.execute(
+                    select(UiSetting).where(
+                        UiSetting.key.in_(["max_posts_size_gb", "posts_trim_chunk_mb"])
+                    )
+                )
+            ).scalars()
+        }
+        try:
+            max_gb = float(rows["max_posts_size_gb"])
+        except (KeyError, ValueError):
+            max_gb = settings.max_posts_size_gb
+        try:
+            chunk_mb = float(rows["posts_trim_chunk_mb"])
+        except (KeyError, ValueError):
+            chunk_mb = settings.posts_trim_chunk_mb
+        return max_gb, chunk_mb
+
+    async def _enforce_size_cap(self) -> None:
+        """Harte Größenobergrenze (settings.max_posts_size_gb) für die
+        posts-Tabelle inkl. ihrer eigenen Indizes (pg_total_relation_size -
+        Postgres-spezifisch, siehe _enforce_storage_limits).
+
+        Löscht bei Überschreitung nur ein Stück der ältesten Posts
+        (settings.posts_trim_chunk_mb), nicht alles auf einen Schlag - hält
+        jeden einzelnen Lauf schnell und günstig. Wird das Limit später
+        stark gesenkt, holt das mehrere Sammel-Läufe in kleinen Schritten
+        nach, statt einmalig einen großen Batch zu löschen.
+
+        Wichtig: DELETE gibt den Plattenplatz nicht an das Betriebssystem
+        zurück (kein VACUUM FULL, das die Tabelle exklusiv sperren würde) -
+        er wird nur für künftige INSERTs wiederverwendet. Die Datei auf der
+        Platte wächst dadurch bis zum Limit und bleibt danach etwa auf der
+        einmal erreichten Größe stehen, schrumpft aber nicht sichtbar - auch
+        nicht, wenn das Limit nachträglich gesenkt wird."""
+        async with SessionLocal() as s:
+            max_gb, chunk_mb = await self._effective_size_limits(s)
+            max_bytes = max_gb * 1024**3
+            if not max_bytes:
+                return
+            total_size, total_rows = (
+                await s.execute(
+                    text("SELECT pg_total_relation_size('posts'), (SELECT count(*) FROM posts)")
+                )
+            ).one()
+            if total_size <= max_bytes or not total_rows:
+                return
+            avg_row_bytes = total_size / total_rows
+            chunk_bytes = chunk_mb * 1024**2
+            rows_to_delete = max(1, math.ceil(chunk_bytes / avg_row_bytes))
+            oldest_ids = select(Post.id).order_by(Post.collected_at.asc()).limit(rows_to_delete)
+            res = await s.execute(delete(Post).where(Post.id.in_(oldest_ids)))
+            await s.commit()
+            removed = res.rowcount or 0
+        if removed:
+            await self._log(
+                "info",
+                "core",
+                f"{removed} älteste Beiträge entfernt (~{chunk_mb:.0f}MB, Limit {max_gb:.0f}GB erreicht)",
             )
 
     async def _store(self, items: list[RawItem], terms: list[str]) -> list[dict]:

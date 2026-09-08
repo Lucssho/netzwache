@@ -42,6 +42,21 @@ class SourcePatch(BaseModel):
     interval_seconds: int | None = Field(default=None, ge=5, le=3600)
 
 
+class DeleteAllPostsConfirm(BaseModel):
+    """Erfordert das exakte Bestätigungswort - eine serverseitige Absicherung
+    zusätzlich zum Bestätigungsdialog im Frontend, damit ein versehentlicher
+    oder skriptgesteuerter Aufruf ohne die Bestätigung nichts löscht."""
+
+    confirm: str
+
+    @field_validator("confirm")
+    @classmethod
+    def exact_phrase(cls, v: str) -> str:
+        if v != "LÖSCHEN":
+            raise ValueError("Bestätigungswort stimmt nicht überein")
+        return v
+
+
 class SettingsPatch(BaseModel):
     """Beliebige Darstellungs-Einstellungen als freies Key-Value-Set.
 

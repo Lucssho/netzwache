@@ -1,4 +1,4 @@
-import type { LogEntry, Post, SourceState, Stats, Term, UiSettings } from "./types";
+import type { LogEntry, Post, SourceState, StorageInfo, Stats, Term, UiSettings } from "./types";
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -34,7 +34,13 @@ export const api = {
     return req<{ items: Post[]; total: number }>(`/api/posts?${qs}`);
   },
 
-  stats: () => req<Stats>("/api/stats"),
+  stats: (params?: { platform?: string; category?: string }) => {
+    const qs = new URLSearchParams(
+      Object.entries(params ?? {}).filter(([, v]) => v && v !== "all") as [string, string][],
+    );
+    const query = qs.toString();
+    return req<Stats>(`/api/stats${query ? `?${query}` : ""}`);
+  },
   sources: () => req<SourceState[]>("/api/sources"),
   log: (limit = 30) => req<LogEntry[]>(`/api/log?limit=${limit}`),
 
@@ -60,6 +66,13 @@ export const api = {
   settings: () => req<UiSettings>("/api/settings"),
   putSettings: (values: Record<string, string>) =>
     req<UiSettings>("/api/settings", { method: "PUT", body: JSON.stringify({ values }) }),
+
+  storageInfo: () => req<StorageInfo>("/api/settings/storage"),
+  deleteAllPosts: (confirm: string) =>
+    req<{ removed: number }>("/api/maintenance/delete-all-posts", {
+      method: "POST",
+      body: JSON.stringify({ confirm }),
+    }),
 
   authMe: () => req<{ authenticated: boolean }>("/api/auth/me"),
   authLogin: (username: string, password: string) =>

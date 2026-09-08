@@ -108,3 +108,27 @@ async def test_posts_source_filter_and_accurate_category_total(app_client, seed_
 
     other_cat = (await app_client.get("/api/posts?category=it&q=ransomware")).json()
     assert other_cat["total"] == 0, "der Ransomware-Post ist nicht als 'it' kategorisiert"
+
+
+@pytest.mark.asyncio
+async def test_stats_tab_counts_respect_the_other_active_filter(app_client, seed_posts):
+    """tab_platform_counts/tab_category_counts sind für die Filter-Reiter
+    gedacht - sie müssen das jeweils ANDERE aktive Filter respektieren.
+    Sonst zeigt z.B. der Reddit-Reiter die globale Zahl an, obwohl bei
+    aktivem Kategorie-Filter tatsächlich weniger sichtbar wären (der
+    globale by_platform/by_category bleibt fürs Lagebild-Widget unverändert)."""
+    await seed_posts()
+
+    # Ohne Filter: tab_platform_counts entspricht dem globalen by_platform
+    unfiltered = (await app_client.get("/api/stats")).json()
+    assert unfiltered["tab_platform_counts"]["bluesky"] == unfiltered["by_platform"]["bluesky"]
+
+    # category=cybersecurity aktiv -> der Reddit-Post (kategorisiert als "it") darf nicht mitzählen
+    filtered = (await app_client.get("/api/stats?category=cybersecurity")).json()
+    assert filtered["tab_platform_counts"].get("bluesky") == 1  # der Ransomware-Post ist cybersecurity
+    assert filtered["tab_platform_counts"].get("reddit", 0) == 0, "reddit-Post ist 'it', nicht 'cybersecurity'"
+
+    # platform=reddit aktiv -> Kategorie-Reiter respektieren nur reddit-Posts
+    by_platform_reddit = (await app_client.get("/api/stats?platform=reddit")).json()
+    assert by_platform_reddit["tab_category_counts"]["it"] == 1
+    assert by_platform_reddit["tab_category_counts"]["cybersecurity"] == 0

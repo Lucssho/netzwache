@@ -267,17 +267,26 @@ Migrationsschritt nötig, das läuft auch auf der schon existierenden `posts`-Ta
 
 ## Speicherbegrenzung
 
-Zwei automatische, voneinander unabhängige Räumungen laufen im Scheduler mit, keine davon
+Drei automatische, voneinander unabhängige Räumungen laufen im Scheduler mit, keine davon
 braucht einen manuellen Aufruf:
 
-* **`MAX_POSTS`** (Standard 10000): harte Obergrenze für die `posts`-Tabelle. Nach jedem
-  Sammel-Lauf, der neue Beiträge gespeichert hat, prüft der Scheduler die Gesamtzahl - wird die
-  Grenze überschritten, fallen die ältesten Beiträge (nach `collected_at`) sofort raus, bis das
-  Limit wieder eingehalten ist.
+* **`MAX_POSTS_SIZE_GB`** (Standard 15, nur **Postgres/Produktion**): harte Größenobergrenze für
+  die `posts`-Tabelle inkl. ihrer eigenen Indizes (`pg_total_relation_size`). Nach jedem
+  Sammel-Lauf, der neue Beiträge gespeichert hat, prüft der Scheduler die tatsächliche Größe -
+  wird das Limit überschritten, fällt ein Stück der ältesten Beiträge (nach `collected_at`) raus,
+  ungefähr **`POSTS_TRIM_CHUNK_MB`** (Standard 100 MB) pro Lauf - nicht alles auf einen Schlag.
+  Wird das Limit später stark gesenkt, holt das mehrere Sammel-Läufe in kleinen Schritten nach.
+  Die Menge pro Räumung ist eine Schätzung (Gesamtgröße ÷ Zeilenzahl × zu löschende Zeilen), kein
+  exakter Bytewert. **Wichtig:** `DELETE` gibt Plattenplatz nicht an das Betriebssystem zurück
+  (kein automatisches `VACUUM FULL`, das die Tabelle exklusiv sperren würde) - er wird nur für
+  künftige Einträge wiederverwendet. Die Datenbankdatei wächst dadurch bis zum Limit und bleibt
+  danach etwa auf der einmal erreichten Größe stehen, auch wenn man das Limit später senkt.
+* **`MAX_POSTS`** (Standard 10000, nur **SQLite/Dev-Tests**): einfache Zeilen-Obergrenze, weil
+  SQLite kein `pg_total_relation_size` kennt und die Datenmengen dort ohnehin klein bleiben.
 * **`RETENTION_DAYS`** (Standard 30) + **`CLEANUP_INTERVAL_SECONDS`** (Standard 86400 = 24h):
-  zeitbasierte Räumung - alle X Sekunden werden Posts gelöscht, die älter als `RETENTION_DAYS`
-  sind (nach `collected_at`), zusammen mit Log-Einträgen älter als 3 Tage. Läuft erstmals sofort
-  beim Start des Backends, danach im konfigurierten Takt.
+  zeitbasierte Räumung, unabhängig von den beiden oben - alle X Sekunden werden Posts gelöscht,
+  die älter als `RETENTION_DAYS` sind (nach `collected_at`), zusammen mit Log-Einträgen älter als
+  3 Tage. Läuft erstmals sofort beim Start des Backends, danach im konfigurierten Takt.
 
 `POST /api/maintenance/cleanup` (Admin) stößt dieselbe zeitbasierte Räumung zusätzlich manuell an,
 z.B. um nicht auf den nächsten automatischen Lauf zu warten.

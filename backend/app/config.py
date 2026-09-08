@@ -45,7 +45,14 @@ class Settings(BaseSettings):
     max_items_per_run: int = 50
     retention_days: int = 30        # Posts älter als X Tage werden aufgeräumt
     cleanup_interval_seconds: int = 24 * 60 * 60  # wie oft die Retention-Räumung automatisch läuft
-    max_posts: int = 10000          # harte Obergrenze - älteste Posts fallen zuerst raus
+    max_posts: int = 10000          # Zeilen-Obergrenze - nur für SQLite (Dev/Tests)
+    # Größen-Obergrenze für posts (Postgres) und wie viel pro Räumung gelöscht
+    # wird - beides nur der Default-Wert beim allerersten Start. Danach lebt
+    # der tatsächliche Wert in ui_settings und ist per Admin-Oberfläche
+    # (PUT /api/settings) live änderbar, ohne Neustart (siehe scheduler.py::
+    # _effective_size_limits). 0 = Größenlimit deaktiviert.
+    max_posts_size_gb: float = 15.0
+    posts_trim_chunk_mb: float = 100.0
 
     # --- Intervalle je Quelle (Sekunden, respektiert Rate-Limits) -------
     interval_bluesky: int = 300

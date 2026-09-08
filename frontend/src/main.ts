@@ -6,6 +6,7 @@ import { renderHeader } from "./components/header";
 import { applySettings } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
+import { openStoragePanel } from "./components/storagePanel";
 import { renderTerms } from "./components/terms";
 import {
   getFocusTerm as getStoredFocusTerm,
@@ -18,7 +19,7 @@ import type { Filters, Post, SourceState, Stats, Term, UiSettings } from "./type
 import { esc, restrictToAlnum } from "./utils";
 import { LiveStream } from "./ws";
 
-const MAX_BUFFER = 400;
+const MAX_BUFFER = 3000;
 
 const DEFAULT_SETTINGS: UiSettings = {
   font_family: "jetbrains",
@@ -29,6 +30,8 @@ const DEFAULT_SETTINGS: UiSettings = {
 
 const state = {
   posts: [] as Post[],
+  postsTotal: 0, // "total" aus der letzten /api/posts-Antwort für die aktuellen Filter - für "gibt es noch mehr zum Nachladen?"
+  loadingMore: false,
   sources: [] as SourceState[],
   terms: [] as Term[],
   stats: null as Stats | null,
@@ -88,6 +91,8 @@ app.innerHTML = `
       </svg>
       <span class="theme-switch-knob"></span>
     </button>
+
+    <button id="btn-storage" class="icon-btn" type="button" title="Speicherverwaltung" style="display:none">💾</button>
 
     <div class="admin-login-anchor">
       <button id="btn-admin" class="btn-ghost" type="button" title="Admin-Anmeldung">Admin</button>
@@ -162,6 +167,7 @@ app.innerHTML = `
         </div>
         <div class="panel-body tight" id="feed-scroll">
           <div class="feed" id="feed"></div>
+          <div class="feed-loading" id="feed-loading" style="display:none">Lädt weitere Beiträge …</div>
         </div>
       </section>
     </div>
@@ -196,6 +202,7 @@ const els = {
   btnCollect: $<HTMLButtonElement>("btn-collect"),
   btnTheme: $<HTMLButtonElement>("btn-theme"),
   btnAdmin: $<HTMLButtonElement>("btn-admin"),
+  btnStorage: $<HTMLButtonElement>("btn-storage"),
   adminLoginForm: $<HTMLFormElement>("admin-login-form"),
   adminUser: $<HTMLInputElement>("admin-user"),
   adminPass: $<HTMLInputElement>("admin-pass"),
@@ -213,6 +220,7 @@ const els = {
   feed: $("feed"),
   feedScroll: $("feed-scroll"),
   feedInfo: $("feed-info"),
+  feedLoading: $("feed-loading"),
   feedVariantToggle: $("feed-variant-toggle"),
   focusBar: $("focus-bar"),
   focusBarTerm: $("focus-bar-term"),
@@ -252,7 +260,7 @@ function renderTabs(): void {
       ([v, l]) =>
         `<button class="tab ${state.filters.platform === v ? "active" : ""}" data-v="${v}">
        ${v !== "all" ? platformIcon(v, 12) : ""}<span>${l}</span>
-       ${v !== "all" && state.stats?.by_platform[v] ? `<span class="cnt">${state.stats.by_platform[v]}</span>` : ""}
+       ${v !== "all" && state.stats?.tab_platform_counts[v] ? `<span class="cnt">${state.stats.tab_platform_counts[v]}</span>` : ""}
        </button>`,
     ).join("") +
     `<div class="tabs-more-anchor">
@@ -284,6 +292,7 @@ function renderTabs(): void {
       state.filters.platform = b.dataset.v!;
       renderTabs();
       void reloadPosts();
+      void refreshStats(); // Reiter-Zähler sofort an den neuen Filter anpassen, nicht erst beim nächsten 10s-Takt
     }),
   );
   els.tabPlatform.querySelector<HTMLButtonElement>("#btn-more-platforms")!.addEventListener("click", (ev) => {
@@ -296,6 +305,7 @@ function renderTabs(): void {
       state.filters.category = b.dataset.v!;
       renderTabs();
       void reloadPosts();
+      void refreshStats();
     }),
   );
 }
@@ -374,7 +384,7 @@ function setFocusTerm(term: string | null): void {
 // von der Fokus-Modus-Spezifikation erlaubt.
 async function hydrateFocusMatches(term: string): Promise<void> {
   try {
-    const res = await api.posts({ q: term, limit: 200 });
+    const res = await api.posts({ q: term, limit: 500 });
     if (state.filters.focusTerm !== term) return; // Fokus zwischenzeitlich gewechselt/aufgehoben
     const known = new Set(state.posts.map((p) => p.id));
     const fresh = res.items.filter((p) => !known.has(p.id));
@@ -399,9 +409,9 @@ function paintFeed(): void {
       state.resurfacedPostId = null;
     }
   }
-  visible = visible.slice(0, 200);
   renderFeed(els.feed, visible, hasActiveFilter(), state.feedVariant);
-  els.feedInfo.textContent = `${visible.length} sichtbar / ${state.posts.length} im Puffer`;
+  const more = state.postsTotal > state.posts.length ? ` von ${state.postsTotal} (scrollen zum Nachladen)` : "";
+  els.feedInfo.textContent = `${visible.length} sichtbar / ${state.posts.length} im Puffer${more}`;
 
   const focus = state.filters.focusTerm;
   els.focusBar.style.display = focus ? "flex" : "none";
@@ -630,6 +640,7 @@ els.focusWindowToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) 
 // eigentliche Durchsetzung passiert serverseitig (Depends(require_admin)).
 function applyAdminUi(): void {
   els.btnCollect.style.display = state.isAdmin ? "" : "none";
+  els.btnStorage.style.display = state.isAdmin ? "" : "none";
   els.btnAdmin.textContent = state.isAdmin ? "Logout" : "Admin";
   els.btnAdmin.title = state.isAdmin ? "Admin-Sitzung beenden" : "Admin-Anmeldung";
   els.adminLoginForm.style.display = "none";
@@ -668,6 +679,13 @@ els.adminLoginForm.addEventListener("submit", (ev) => {
   })();
 });
 
+els.btnStorage.addEventListener("click", () => {
+  openStoragePanel(() => {
+    state.posts = [];
+    paintFeed();
+  }, toast);
+});
+
 document.addEventListener("click", (ev) => {
   const t = ev.target as Node;
   const anchor = els.btnAdmin.closest(".admin-login-anchor");
@@ -675,19 +693,47 @@ document.addEventListener("click", (ev) => {
 });
 
 // ------------------------------------------------------------ Datenfluss
+const PAGE_SIZE = 500; // Höchstwert, den /api/posts pro Anfrage zulässt (Query(..., le=500))
+
+function postsQueryParams(): Record<string, string | number> {
+  return {
+    platform: state.filters.platform,
+    category: state.filters.category,
+    q: state.filters.query,
+    min_severity: state.filters.minSeverity,
+  };
+}
+
 async function reloadPosts(): Promise<void> {
   try {
-    const res = await api.posts({
-      limit: 150,
-      platform: state.filters.platform,
-      category: state.filters.category,
-      q: state.filters.query,
-      min_severity: state.filters.minSeverity,
-    });
+    const res = await api.posts({ ...postsQueryParams(), limit: PAGE_SIZE, offset: 0 });
     state.posts = res.items;
+    state.postsTotal = res.total;
     paintFeed();
   } catch (e) {
     toast(`Laden fehlgeschlagen: ${e}`, true);
+  }
+}
+
+// Lädt bei Bedarf (Scrollen ans Ende) die nächste Seite nach und hängt sie
+// hinten an - bereits geladene IDs werden übersprungen, falls sich durch
+// neu eingetroffene Live-Posts die Reihenfolge zwischenzeitlich verschoben hat.
+async function loadMorePosts(): Promise<void> {
+  if (state.loadingMore || state.posts.length >= state.postsTotal) return;
+  state.loadingMore = true;
+  els.feedLoading.style.display = "block";
+  try {
+    const res = await api.posts({ ...postsQueryParams(), limit: PAGE_SIZE, offset: state.posts.length });
+    const known = new Set(state.posts.map((p) => p.id));
+    const fresh = res.items.filter((p) => !known.has(p.id));
+    state.posts = [...state.posts, ...fresh];
+    state.postsTotal = res.total;
+    paintFeed();
+  } catch (e) {
+    toast(`Nachladen fehlgeschlagen: ${e}`, true);
+  } finally {
+    state.loadingMore = false;
+    els.feedLoading.style.display = "none";
   }
 }
 
@@ -718,7 +764,6 @@ function prependPosts(incoming: Post[]): void {
   }
   const atTop = els.feedScroll.scrollTop < 60;
   els.feed.insertAdjacentHTML("afterbegin", visible.map((p) => postCard(p, true)).join(""));
-  while (els.feed.children.length > 200) els.feed.lastElementChild?.remove();
   attachExpand(els.feed);
   if (atTop) els.feedScroll.scrollTop = 0;
   els.feedInfo.textContent = `${els.feed.children.length} sichtbar / ${state.posts.length} im Puffer`;
@@ -726,7 +771,10 @@ function prependPosts(incoming: Post[]): void {
 
 async function refreshStats(): Promise<void> {
   try {
-    const stats = await api.stats();
+    const stats = await api.stats({
+      platform: state.filters.platform,
+      category: state.filters.category,
+    });
     state.stats = stats;
     renderStats(els.stats, state.stats);
     renderTabs();
@@ -775,6 +823,11 @@ els.feedVariantToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) 
     b.classList.add("active");
     paintFeed();
   });
+});
+
+els.feedScroll.addEventListener("scroll", () => {
+  const { scrollTop, scrollHeight, clientHeight } = els.feedScroll;
+  if (scrollHeight - scrollTop - clientHeight < 400) void loadMorePosts();
 });
 
 els.btnPause.addEventListener("click", togglePause);
@@ -853,6 +906,17 @@ const stream = new LiveStream((event, data) => {
       state.nextTick = state.tickSeconds;
       onTickBoundary();
       paintHeader();
+      break;
+    case "posts_cleared":
+      // Ein Admin (auf diesem oder einem anderen Gerät) hat alle Beiträge
+      // gelöscht - auch für andere gerade offene Tabs den Puffer leeren.
+      // Wer die Aktion selbst ausgelöst hat, hat state.posts (und die
+      // Meldung) schon direkt bekommen - hier nur noch für alle ANDEREN.
+      if (state.posts.length) {
+        state.posts = [];
+        paintFeed();
+        toast(`Alle Beiträge gelöscht (${(data as { removed: number }).removed})`);
+      }
       break;
   }
 });
