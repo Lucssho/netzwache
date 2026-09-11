@@ -36,7 +36,12 @@ def text_search_clause(dialect: Dialect, q: str) -> ClauseElement:
     über LIKE (portabel, aber ein voller Tabellenscan)."""
     if dialect.name == "sqlite":
         like = f"%{q.lower()}%"
-        return or_(func.lower(Post.text).like(like), func.lower(Post.title).like(like))
+        return or_(
+            func.lower(Post.text).like(like),
+            func.lower(Post.title).like(like),
+            func.lower(Post.author).like(like),
+            func.lower(Post.source).like(like),
+        )
     return text("posts.search_vector @@ websearch_to_tsquery('german', :qtext)").bindparams(qtext=q)
 
 

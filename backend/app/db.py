@@ -1,6 +1,7 @@
 """Datenbank-Session-Handling."""
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 from sqlalchemy import event, text
@@ -8,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from .config import settings
 from .models import Base
+
+log = logging.getLogger("netzwache.db")
 
 engine = create_async_engine(
     settings.database_url,
@@ -47,12 +50,34 @@ async def init_db() -> None:
             # Echte Volltextsuche (Postgres-spezifisch, siehe db_json.py) -
             # SQLite hat kein äquivalentes eingebautes Feature und bleibt
             # beim bisherigen LIKE-Fallback. Generated column hält sich
-            # selbst aktuell (kein Python-Code muss sie pflegen).
+            # selbst aktuell (kein Python-Code muss sie pflegen) - ABER nur
+            # für ihre eigene Definition: ein Post, bei dem der Suchbegriff
+            # nur in author/source steht (z.B. Quelle "BSI CERT-Bund" bei
+            # Suche nach "BSI"), war für /api/posts?q= unauffindbar, weil die
+            # Spalte ursprünglich nur title+text indizierte. "ADD COLUMN IF
+            # NOT EXISTS" reicht hier nicht mehr aus - eine schon bestehende
+            # Spalte mit der alten (zu engen) Definition bleibt sonst für
+            # immer stehen. Deshalb einmalig prüfen und bei Bedarf neu
+            # anlegen (billig bei den hier üblichen Datenmengen).
+            needs_migration = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'posts' AND column_name = 'search_vector' "
+                        "AND generation_expression NOT ILIKE '%author%'"
+                    )
+                )
+            ).first() is not None
+            if needs_migration:
+                log.info("Erweitere search_vector um author/source - einmalige Migration …")
+                await conn.execute(text("DROP INDEX IF EXISTS ix_posts_search_vector"))
+                await conn.execute(text("ALTER TABLE posts DROP COLUMN IF EXISTS search_vector"))
             await conn.execute(
                 text(
                     "ALTER TABLE posts ADD COLUMN IF NOT EXISTS search_vector tsvector "
                     "GENERATED ALWAYS AS (to_tsvector('german', "
-                    "coalesce(title, '') || ' ' || coalesce(text, ''))) STORED"
+                    "coalesce(title, '') || ' ' || coalesce(text, '') || ' ' || "
+                    "coalesce(author, '') || ' ' || coalesce(source, ''))) STORED"
                 )
             )
             await conn.execute(

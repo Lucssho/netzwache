@@ -331,18 +331,32 @@ document.addEventListener("click", (ev) => {
   if (anchor && !anchor.contains(ev.target as Node)) panel!.style.display = "none";
 });
 
+// Reines String.includes() matcht auch mitten in fremden Wörtern - z.B. steckt
+// "bsi" wörtlich in "web-BSI-te" ("website"). Bei kurzen Begriffen/Abkürzungen
+// (BSI, CVE, ...) erzeugt das massenhaft falsche Treffer, deren Anzahl zudem
+// rein zufällig davon abhängt, wie viele der gerade geladenen Beiträge das
+// Zufalls-Wort enthalten - genau das ließ z.B. "alle themen" (ein anderer,
+// zufällig anders zusammengesetzter Beitrags-Puffer) einen NIEDRIGEREN
+// "BSI"-Treffer zeigen als "cybersec", obwohl "alle themen" eine reine
+// Erweiterung des Filters ist. \b-Wortgrenzen (erweitert um deutsche Umlaute/
+// ß, die JS' Standard-\b nicht als Wortzeichen kennt) statt reinem
+// Enthaltensein behebt das.
+function containsWholeWord(haystack: string, term: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\wäöüßÄÖÜ])${escaped}(?![\\wäöüßÄÖÜ])`, "i").test(haystack);
+}
+
 function matchesFilter(p: Post): boolean {
   const f = state.filters;
   if (f.platform !== "all" && p.platform !== f.platform) return false;
   if (f.category !== "all" && !(p.categories || []).includes(f.category)) return false;
   if (f.minSeverity && p.severity < f.minSeverity) return false;
-  // Bewusst per Freitext-Enthaltensein geprüft (wie f.query unten), nicht
-  // über matched_terms: ein Beitrag, der schon vor dem Anlegen dieses Begriffs
+  // Bewusst per Freitext-Suche geprüft (wie f.query unten), nicht über
+  // matched_terms: ein Beitrag, der schon vor dem Anlegen dieses Begriffs
   // existierte, wurde nie rückwirkend mit ihm getaggt, obwohl sein Text ihn
   // enthalten kann - matched_terms wäre hier also fälschlich leer.
   if (f.focusTerm) {
-    const ft = f.focusTerm.toLowerCase();
-    if (!`${p.title} ${p.text} ${p.author} ${p.source}`.toLowerCase().includes(ft)) return false;
+    if (!containsWholeWord(`${p.title} ${p.text} ${p.author} ${p.source}`, f.focusTerm)) return false;
     // Zeitfenster gilt nur im Fokus-Modus - blendet auf Wunsch alles vor
     // "jetzt"/"1h"/"24h" aus, damit man nach dem Fokussieren nicht durch bis
     // zu 200 gepufferte Treffer scrollen muss. Bewusst collected_at statt
@@ -805,6 +819,13 @@ function prependPosts(incoming: Post[]): void {
   if (!fresh.length) return;
 
   state.posts = [...fresh.reverse(), ...state.posts].slice(0, MAX_BUFFER);
+  // Wie reloadPosts(): jeder Live-Stream-Schub kappt den Puffer wieder auf
+  // MAX_BUFFER, wodurch mit der Zeit genau die älteren, schon fokus-
+  // nachgeladenen Treffer vom Tail verdrängt werden - ohne dieses erneute
+  // Nachladen sinkt die Fokus-Trefferzahl langsam, je länger die Seite mit
+  // aktivem Live-Stream offen bleibt, bis ein Neuladen sie wieder korrigiert
+  // (siehe hydrateFocusMatches()).
+  if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
 
   if (state.filters.paused) return;
 
