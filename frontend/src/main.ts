@@ -404,7 +404,14 @@ async function hydrateFocusMatches(term: string): Promise<void> {
     const known = new Set(state.posts.map((p) => p.id));
     const fresh = res.items.filter((p) => !known.has(p.id));
     if (!fresh.length) return;
-    state.posts = [...state.posts, ...fresh].slice(0, MAX_BUFFER + 200);
+    // Feste Kappungs-Reserve (früher +200) hat frisch nachgeladene Treffer
+    // wieder verworfen, sobald state.posts durch normales Scrollen/Live-
+    // Stream schon nah an MAX_BUFFER war - genau der Fall, der die Fokus-
+    // Trefferzahl bis zum Neuladen falsch (zu niedrig) anzeigen ließ. Reserve
+    // muss mindestens so groß sein wie das, was gerade tatsächlich neu dazu-
+    // kommt, sonst frisst die Kappung genau die Treffer, die hier erst geholt
+    // wurden.
+    state.posts = [...state.posts, ...fresh].slice(0, MAX_BUFFER + fresh.length);
     paintFeed();
     paintSources();
   } catch {
@@ -751,6 +758,14 @@ async function reloadPosts(): Promise<void> {
     state.posts = res.items;
     state.postsTotal = res.total;
     paintFeed();
+    // reloadPosts ersetzt state.posts komplett durch nur die neuesten PAGE_SIZE
+    // Beiträge des neuen Filters (Plattform-/Kategorie-Tab, Suche, Collect-Now).
+    // Ein aktiver Fokus-Begriff würde dadurch plötzlich nur noch gegen diesen
+    // winzigen, frischen Puffer geprüft - ohne erneutes Nachladen zeigt die
+    // Fokus-Leiste dann einen viel zu niedrigen "Treffer"-Wert (z.B. nach
+    // Kategoriewechsel von "cybersec" auf "alle themen": weniger statt mehr
+    // Treffer, obwohl der Filter weiter wird). Siehe hydrateFocusMatches().
+    if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
   } catch (e) {
     toast(`Laden fehlgeschlagen: ${e}`, true);
   }
