@@ -1,13 +1,15 @@
 import "./styles.css";
 
 import { api } from "./api";
-import { attachExpand, postCard, renderFeed, type FeedVariant } from "./components/feed";
+import { type FeedVariant } from "./components/feed";
 import { renderHeader } from "./components/header";
 import { applySettings } from "./components/settingsPanel";
 import { renderSources } from "./components/sources";
 import { renderStats } from "./components/stats";
 import { openStoragePanel } from "./components/storagePanel";
 import { renderTerms } from "./components/terms";
+import { VirtualFeed } from "./components/virtualFeed";
+import { getLowEffects, setLowEffects } from "./effectsStorage";
 import {
   getFocusTerm as getStoredFocusTerm,
   getFocusWindowMinutes as getStoredFocusWindowMinutes,
@@ -61,6 +63,11 @@ const state = {
 // Sofort anwenden (aus lokalem Fallback), bevor überhaupt ein Request raus ist -
 // verhindert einen kurzen Blitz mit der Standardschrift.
 applySettings(state.settings);
+// Ebenso sofort, vor dem ersten Paint: verhindert einen kurzen Blitz mit
+// aktivem Weichzeichner, falls "reduzierte Effekte" gespeichert/per System
+// verlangt ist. Der Button selbst (els.btnEffects) existiert erst nach dem
+// app.innerHTML weiter unten - das Attribut hier reicht aber schon für CSS.
+document.documentElement.dataset.effects = getLowEffects() ? "low" : "full";
 
 // ---------------------------------------------------------------- Gerüst
 const app = document.getElementById("app")!;
@@ -91,6 +98,8 @@ app.innerHTML = `
       </svg>
       <span class="theme-switch-knob"></span>
     </button>
+
+    <button id="btn-effects" class="icon-btn" type="button" title="Reduzierte Effekte (Weichzeichner aus - schont schwache Grafikkarten)">✨</button>
 
     <button id="btn-storage" class="icon-btn" type="button" title="Speicherverwaltung" style="display:none">💾</button>
 
@@ -201,6 +210,7 @@ const els = {
   btnPause: $<HTMLButtonElement>("btn-pause"),
   btnCollect: $<HTMLButtonElement>("btn-collect"),
   btnTheme: $<HTMLButtonElement>("btn-theme"),
+  btnEffects: $<HTMLButtonElement>("btn-effects"),
   btnAdmin: $<HTMLButtonElement>("btn-admin"),
   btnStorage: $<HTMLButtonElement>("btn-storage"),
   adminLoginForm: $<HTMLFormElement>("admin-login-form"),
@@ -230,6 +240,11 @@ const els = {
   stats: $("stats"),
   toasts: $("toasts"),
 };
+
+// Rendert nur ein Fenster der Liste als echte DOM-Knoten (siehe virtualFeed.ts) -
+// macht ein Feed-Update unabhängig davon, ob 500 oder 500.000 Beiträge insgesamt
+// geladen sind: es wird immer nur das aktuell Sichtbare (plus Puffer) gebaut.
+const virtualFeed = new VirtualFeed(els.feedScroll, els.feed, () => void loadMorePosts());
 
 // ---------------------------------------------------------------- Filter
 const PLATFORMS = [
@@ -409,8 +424,17 @@ function paintFeed(): void {
       state.resurfacedPostId = null;
     }
   }
-  renderFeed(els.feed, visible, hasActiveFilter(), state.feedVariant);
-  const more = state.postsTotal > state.posts.length ? ` von ${state.postsTotal} (scrollen zum Nachladen)` : "";
+  // VirtualFeed baut nur die Karten, die gerade (plus Puffer) im Sichtbereich
+  // liegen - unabhängig davon, wie groß "visible" insgesamt ist, bleibt das
+  // teure Layout/Paint konstant klein (siehe virtualFeed.ts).
+  virtualFeed.update(visible, hasActiveFilter(), state.feedVariant);
+  let more = "";
+  if (state.postsTotal > state.posts.length) {
+    more =
+      state.posts.length >= MAX_BUFFER
+        ? ` von ${state.postsTotal} (nur die neuesten ${MAX_BUFFER} geladen - Filter/Suche nutzen für ältere Treffer)`
+        : ` von ${state.postsTotal} (scrollen zum Nachladen)`;
+  }
   els.feedInfo.textContent = `${visible.length} sichtbar / ${state.posts.length} im Puffer${more}`;
 
   const focus = state.filters.focusTerm;
@@ -621,6 +645,23 @@ async function toggleTheme(): Promise<void> {
 
 els.btnTheme.addEventListener("click", () => void toggleTheme());
 
+// Wie Theme: rein clientseitig (siehe effectsStorage.ts) - eine Geräte-
+// Eigenschaft ("dieser Rechner ist schwach"), kein geteilter Server-Zustand.
+function applyEffectsMode(lowEffects: boolean): void {
+  document.documentElement.dataset.effects = lowEffects ? "low" : "full";
+  els.btnEffects.classList.toggle("active", lowEffects);
+  els.btnEffects.setAttribute("aria-pressed", String(lowEffects));
+  els.btnEffects.title = lowEffects
+    ? "Reduzierte Effekte an (Weichzeichner aus) - klicken für volle Optik"
+    : "Reduzierte Effekte (Weichzeichner aus - schont schwache Grafikkarten)";
+}
+
+els.btnEffects.addEventListener("click", () => {
+  const next = document.documentElement.dataset.effects !== "low";
+  setLowEffects(next);
+  applyEffectsMode(next);
+});
+
 els.focusBarClear.addEventListener("click", () => setFocusTerm(null));
 
 els.focusWindowToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
@@ -718,15 +759,20 @@ async function reloadPosts(): Promise<void> {
 // Lädt bei Bedarf (Scrollen ans Ende) die nächste Seite nach und hängt sie
 // hinten an - bereits geladene IDs werden übersprungen, falls sich durch
 // neu eingetroffene Live-Posts die Reihenfolge zwischenzeitlich verschoben hat.
+// Gedeckelt bei MAX_BUFFER (wie der Live-Update-Pfad in prependPosts) - ohne
+// diesen Deckel würde state.posts beim Durchscrollen einer sehr großen
+// Ergebnismenge (mehrere Zehntausend Treffer) unbegrenzt wachsen. Ab dem
+// Deckel zeigt paintFeed() stattdessen einen Hinweis, über Suche/Filter
+// gezielt weiterzukommen statt endlos zu scrollen.
 async function loadMorePosts(): Promise<void> {
-  if (state.loadingMore || state.posts.length >= state.postsTotal) return;
+  if (state.loadingMore || state.posts.length >= state.postsTotal || state.posts.length >= MAX_BUFFER) return;
   state.loadingMore = true;
   els.feedLoading.style.display = "block";
   try {
     const res = await api.posts({ ...postsQueryParams(), limit: PAGE_SIZE, offset: state.posts.length });
     const known = new Set(state.posts.map((p) => p.id));
     const fresh = res.items.filter((p) => !known.has(p.id));
-    state.posts = [...state.posts, ...fresh];
+    state.posts = [...state.posts, ...fresh].slice(0, MAX_BUFFER);
     state.postsTotal = res.total;
     paintFeed();
   } catch (e) {
@@ -747,26 +793,24 @@ function prependPosts(incoming: Post[]): void {
 
   if (state.filters.paused) return;
 
-  const visible = fresh.filter(matchesFilter);
-  if (!visible.length) {
-    els.feedInfo.textContent = `${els.feed.children.length} sichtbar / ${state.posts.length} im Puffer`;
+  if (panelsAnimating) {
+    // Rendern zurückhalten, bis die Kollaps-Animation fertig ist - state.posts
+    // ist oben schon aktualisiert, hier holt endPanelAnimation() nur noch das
+    // Rendern nach.
+    pendingFeedFlush = () => applyFreshPosts();
     return;
   }
-  if (state.resurfacedPostId != null) {
-    // Echte neue Beiträge verdrängen sofort den wiederhochgeholten Beitrag.
-    state.resurfacedPostId = null;
-    paintFeed();
-    return;
-  }
-  if (state.feedVariant === "grid") {
-    paintFeed();
-    return;
-  }
+  applyFreshPosts();
+}
+
+// Mit VirtualFeed ist jedes Update gleich billig (immer nur das sichtbare
+// Fenster wird gebaut), daher kein Sonderfall mehr nötig für "neue Beiträge
+// per WebSocket" vs. "Filterwechsel" - beides läuft über denselben Pfad.
+function applyFreshPosts(): void {
+  if (state.resurfacedPostId != null) state.resurfacedPostId = null; // echte neue Beiträge verdrängen den wiederhochgeholten
   const atTop = els.feedScroll.scrollTop < 60;
-  els.feed.insertAdjacentHTML("afterbegin", visible.map((p) => postCard(p, true)).join(""));
-  attachExpand(els.feed);
+  paintFeed();
   if (atTop) els.feedScroll.scrollTop = 0;
-  els.feedInfo.textContent = `${els.feed.children.length} sichtbar / ${state.posts.length} im Puffer`;
 }
 
 async function refreshStats(): Promise<void> {
@@ -776,9 +820,19 @@ async function refreshStats(): Promise<void> {
       category: state.filters.category,
     });
     state.stats = stats;
-    renderStats(els.stats, state.stats);
-    renderTabs();
-    paintHeader();
+    const apply = () => {
+      renderStats(els.stats, state.stats);
+      renderTabs();
+      paintHeader();
+    };
+    // Lagebild baut seinen Inhalt bei jedem Refresh komplett per innerHTML
+    // neu auf - fällt das zufällig in dieselben ~0.32s wie eine laufende
+    // Kollaps-Animation, zurückhalten statt zusätzlich dazu zu rendern.
+    if (panelsAnimating) {
+      pendingStatsFlush = apply;
+    } else {
+      apply();
+    }
   } catch {
     /* Backend noch nicht bereit */
   }
@@ -793,6 +847,47 @@ els.search.addEventListener("input", () => {
   (els.search as any)._t = setTimeout(() => void reloadPosts(), 320);
 });
 
+// Suchraum (links) und Lagebild (rechts) teilen sich dieselbe
+// grid-template-columns-Animation auf #main-grid (0.32s). Während sie läuft,
+// sollen weder der Weichzeichner der Panels (siehe .animating-cols in
+// styles.css) noch ein zufällig hereinkommendes WS-Update (neue Beiträge,
+// Stats-Refresh alle 10s) zusätzliche Layout-/Paint-Arbeit in dieselben
+// Frames drängen - das würde die ohnehin knappe Frame-Zeit der Animation
+// noch weiter belasten. Statt die Updates zu verlieren, werden sie nur kurz
+// zurückgehalten und direkt nach Animationsende nachgeholt.
+let panelsAnimating = false;
+let pendingFeedFlush: (() => void) | null = null;
+let pendingStatsFlush: (() => void) | null = null;
+let animEndTimer: ReturnType<typeof setTimeout> | null = null;
+
+function beginPanelAnimation(): void {
+  panelsAnimating = true;
+  els.mainGrid.classList.add("animating-cols");
+  if (animEndTimer) clearTimeout(animEndTimer);
+  // Fallback zu transitionend: falls das Ereignis aus irgendeinem Grund
+  // ausbleibt (z.B. reduzierte Bewegung, Tab im Hintergrund gedrosselt),
+  // spätestens nach Ablauf der CSS-Transition (0.32s) selbst aufräumen.
+  animEndTimer = setTimeout(endPanelAnimation, 400);
+}
+
+function endPanelAnimation(): void {
+  if (!panelsAnimating) return;
+  panelsAnimating = false;
+  els.mainGrid.classList.remove("animating-cols");
+  if (animEndTimer) {
+    clearTimeout(animEndTimer);
+    animEndTimer = null;
+  }
+  pendingFeedFlush?.();
+  pendingFeedFlush = null;
+  pendingStatsFlush?.();
+  pendingStatsFlush = null;
+}
+
+els.mainGrid.addEventListener("transitionend", (ev) => {
+  if (ev.target === els.mainGrid && ev.propertyName === "grid-template-columns") endPanelAnimation();
+});
+
 els.btnSourcesToggle.addEventListener("click", () => {
   state.sourcesOpen = !state.sourcesOpen;
   els.sources.classList.toggle("collapsed", !state.sourcesOpen);
@@ -801,6 +896,7 @@ els.btnSourcesToggle.addEventListener("click", () => {
 
 els.btnLeftColToggle.addEventListener("click", () => {
   state.leftColOpen = !state.leftColOpen;
+  beginPanelAnimation();
   els.colOuterLeft.classList.toggle("collapsed", !state.leftColOpen);
   els.btnLeftColToggle.classList.toggle("flip", !state.leftColOpen);
   els.mainGrid.classList.toggle("left-collapsed", !state.leftColOpen);
@@ -808,6 +904,7 @@ els.btnLeftColToggle.addEventListener("click", () => {
 
 els.btnLagebildToggle.addEventListener("click", () => {
   state.lagebildOpen = !state.lagebildOpen;
+  beginPanelAnimation();
   els.lagebildTitle.style.display = state.lagebildOpen ? "" : "none";
   els.stats.classList.toggle("collapsed", !state.lagebildOpen);
   els.btnLagebildToggle.classList.toggle("flip", state.lagebildOpen);
@@ -825,10 +922,8 @@ els.feedVariantToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) 
   });
 });
 
-els.feedScroll.addEventListener("scroll", () => {
-  const { scrollTop, scrollHeight, clientHeight } = els.feedScroll;
-  if (scrollHeight - scrollTop - clientHeight < 400) void loadMorePosts();
-});
+// Scroll-getriebenes Nachladen übernimmt VirtualFeed selbst (onNearEnd-Callback,
+// siehe die Instanziierung weiter oben) - kein eigener Scroll-Handler mehr nötig.
 
 els.btnPause.addEventListener("click", togglePause);
 
@@ -956,6 +1051,7 @@ async function boot(): Promise<void> {
   }
   applySettings(state.settings);
   paintThemeIcon();
+  applyEffectsMode(getLowEffects());
   applyAdminUi();
 
   await reloadPosts();

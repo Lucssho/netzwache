@@ -274,6 +274,20 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
 .main.right-collapsed { grid-template-columns: 300px minmax(0, 1fr) 44px; }
 .main.left-collapsed.right-collapsed { grid-template-columns: 44px minmax(0, 1fr) 44px; }
 
+/* Während der Kollaps-Animation: backdrop-filter (Weichzeichner) auf den
+   Spalten, deren Breite sich gerade ändert, abschalten. Ein Gaussian-Blur-
+   Backdrop muss bei jeder neuen Boxgröße komplett neu über die volle Fläche
+   berechnet werden - über ~20 Frames hinweg ist das der mit Abstand teuerste
+   Teil der Animation (deutlich teurer als das Grid-Layout selbst). Die
+   normale halbtransparente Panel-Fläche (--panel-bg) bleibt sichtbar, nur
+   der Weichzeichner pausiert kurz - kaum wahrnehmbar bei 0.32s Dauer. */
+.main.animating-cols .col-outer,
+.main.animating-cols .col-right > .panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.main.animating-cols { will-change: grid-template-columns; }
+
 .col { display: flex; flex-direction: column; gap: var(--gap-main); overflow: hidden; }
 .col.scroll { overflow-y: auto; padding-right: 3px; }
 
@@ -859,6 +873,12 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 .feed { display: flex; flex-direction: column; gap: var(--gap-feed); }
 .feed.variant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 
+/* Platzhalter vor/nach dem virtualisierten Renderfenster (siehe VirtualFeed) -
+   geben dem Scroll-Container die korrekte Gesamthöhe, ohne dass tatsächlich
+   alle Einträge als DOM-Knoten existieren müssen. */
+.feed-vspacer { flex-shrink: 0; width: 100%; }
+.feed.variant-grid .feed-vspacer { grid-column: 1 / -1; }
+
 .post-square {
   display: flex;
   flex-direction: column;
@@ -1144,3 +1164,42 @@ a.post-square:hover { text-decoration: none; }
 .btn-danger:hover { background: color-mix(in srgb, var(--red) 22%, transparent); }
 .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-danger:disabled:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+
+/* ===================== Performance / Barrierefreiheit ===================== */
+
+/* Betriebssystem-Einstellung "Bewegung reduzieren" respektieren: schaltet
+   JEDE Transition/Animation auf der Seite praktisch ab (Dauer ~0), statt
+   jede einzelne Stelle im CSS einzeln anfassen zu müssen. Wer das auf
+   Systemebene verlangt hat, hat meist einen guten Grund (Bewegungskrankheit,
+   aber auch oft schwächere/geschonte Hardware) - beides profitiert davon,
+   dass z.B. die Suchraum/Lagebild-Kollaps-Animation und alle Hover-/
+   Fade-Übergänge sofort statt animiert erscheinen. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* "Reduzierte Effekte" (siehe effectsStorage.ts, umschaltbar per btn-effects) -
+   schaltet den Weichzeichner (backdrop-filter) ab, den mit Abstand teuersten
+   Paint-Effekt hier: er muss bei jeder Boxgröße/-position neu über die volle
+   Fläche berechnet werden, was auf integrierter/schwacher Grafik spürbar
+   Zeit kostet. Die dahinterliegende Fläche (--panel-bg/--popover-bg) ist
+   bereits so deckend gewählt, dass sie auch ohne Weichzeichner gut lesbar
+   bleibt - nur der "Frosted Glass"-Look entfällt.
+   Ohne gespeicherte Wahl setzt main.ts beim Start bereits explizit
+   data-effects="low", wenn das System "Bewegung reduzieren" verlangt (siehe
+   effectsStorage.ts) - hier muss also nur noch das Attribut selbst geprüft
+   werden, nicht zusätzlich die Media Query. */
+[data-effects="low"] .col-outer,
+[data-effects="low"] .panel,
+[data-effects="low"] .admin-login,
+[data-effects="low"] .tabs-more-panel,
+[data-effects="low"] .toast,
+[data-effects="low"] .modal-panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

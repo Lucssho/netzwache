@@ -9,9 +9,11 @@ const CATEGORY_LABEL: Record<string, string> = {
   alltag: "alltag",
 };
 
-// Bleibt über Re-Renders hinweg erhalten (Filterbox wird bei jedem paintTerms()
-// neu ins DOM geschrieben), damit Tippen nicht bei jeder Aktion verloren geht.
+// Bleiben über Re-Renders hinweg erhalten (Filterbox/Auswahl werden bei jedem
+// paintTerms() neu ins DOM geschrieben), damit Tippen/Auswahl nicht bei jeder
+// Aktion verloren gehen.
 let tagSearch = "";
+let tagCategoryFilter = ""; // "" = kein Kategorie-Filter (alle anzeigen)
 
 export function renderTerms(
   el: HTMLElement,
@@ -27,7 +29,11 @@ export function renderTerms(
   freshId?: number,
 ): void {
   const q = tagSearch.trim().toLowerCase();
-  const visibleTerms = q ? terms.filter((t) => t.term.toLowerCase().includes(q)) : terms;
+  const visibleTerms = terms.filter(
+    (t) =>
+      (!q || t.term.toLowerCase().includes(q)) &&
+      (!tagCategoryFilter || t.category === tagCategoryFilter),
+  );
 
   el.innerHTML = `
     <div class="term-controls-sticky">
@@ -35,8 +41,11 @@ export function renderTerms(
         isAdmin
           ? `<form class="term-input" id="term-form" autocomplete="off">
                <input id="term-input" placeholder="neuer Suchbegriff …" maxlength="120" />
-               <select id="term-cat">
-                 ${CATEGORIES.map((c) => `<option value="${c}">${CATEGORY_LABEL[c]}</option>`).join("")}
+               <select id="term-cat" title="Neuen Begriff dieser Kategorie zuordnen - Auswahl filtert auch die Liste unten">
+                 <option value="" ${tagCategoryFilter ? "" : "selected"}>alle</option>
+                 ${CATEGORIES.map(
+                   (c) => `<option value="${c}" ${tagCategoryFilter === c ? "selected" : ""}>${CATEGORY_LABEL[c]}</option>`,
+                 ).join("")}
                </select>
                <button type="submit" class="btn-go" title="Begriff hinzufügen und sofort danach suchen">+</button>
              </form>`
@@ -46,7 +55,7 @@ export function renderTerms(
         terms.length > 6
           ? `<div class="term-search-wrap">
                <input id="term-search" class="term-search" placeholder="Tags filtern …" value="${esc(tagSearch)}" autocomplete="off" />
-               <button type="button" id="term-search-clear" class="term-search-clear" title="Filter zurücksetzen" style="display:${tagSearch ? "flex" : "none"}">×</button>
+               <button type="button" id="term-search-clear" class="term-search-clear" title="Filter zurücksetzen" style="display:${tagSearch || tagCategoryFilter ? "flex" : "none"}">×</button>
              </div>`
           : ""
       }
@@ -81,22 +90,36 @@ export function renderTerms(
   if (input) restrictToAlnum(input);
   if (search) restrictToAlnum(search);
 
+  // Kombiniert Text- und Kategorie-Filter live auf den schon gerenderten Chips -
+  // ohne kompletten Re-Render, damit Tippen/Fokus nicht verloren gehen.
+  function applyLiveFilter(): void {
+    const term = tagSearch.trim().toLowerCase();
+    el.querySelectorAll<HTMLElement>(".chip").forEach((chip) => {
+      const matchesText = !term || (chip.dataset.term ?? "").toLowerCase().includes(term);
+      const matchesCategory = !tagCategoryFilter || chip.classList.contains(tagCategoryFilter);
+      chip.style.display = matchesText && matchesCategory ? "" : "none";
+    });
+  }
+
   form?.addEventListener("submit", (ev) => {
     ev.preventDefault();
-    if (!input || !cat) return;
+    if (!input || !cat || !cat.value) return;
     const value = input.value.trim();
     if (value.length < 2) return;
     handlers.onAdd(value, cat.value);
     input.value = "";
   });
 
+  cat?.addEventListener("change", () => {
+    tagCategoryFilter = cat.value;
+    applyLiveFilter();
+    if (searchClear) searchClear.style.display = tagSearch || tagCategoryFilter ? "flex" : "none";
+  });
+
   search?.addEventListener("input", () => {
     tagSearch = search.value;
-    const term = tagSearch.trim().toLowerCase();
-    el.querySelectorAll<HTMLElement>(".chip").forEach((chip) => {
-      chip.style.display = !term || (chip.dataset.term ?? "").toLowerCase().includes(term) ? "" : "none";
-    });
-    if (searchClear) searchClear.style.display = tagSearch ? "flex" : "none";
+    applyLiveFilter();
+    if (searchClear) searchClear.style.display = tagSearch || tagCategoryFilter ? "flex" : "none";
   });
   search?.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && search.value) {
@@ -108,6 +131,8 @@ export function renderTerms(
   });
   searchClear?.addEventListener("click", () => {
     tagSearch = "";
+    tagCategoryFilter = "";
+    if (cat) cat.value = "";
     // "Alle Tags wieder sehen" heißt auch: einen aktiven Fokus aufheben -
     // sonst bleiben trotz zurückgesetztem Text alle anderen Chips gedimmt.
     // onFocus löst ein volles Re-Render aus, das die Suchbox mit dem jetzt

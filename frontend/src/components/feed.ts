@@ -68,30 +68,6 @@ export function squareCard(p: Post): string {
   </${tag}>`;
 }
 
-export function renderFeed(el: HTMLElement, posts: Post[], hasFilter: boolean, variant: FeedVariant = "list"): void {
-  el.classList.toggle("variant-grid", variant === "grid");
-
-  if (!posts.length) {
-    el.innerHTML = `
-      <div class="empty">
-        <span class="big">∅</span>
-        ${
-          hasFilter
-            ? "Keine Treffer für diesen Filter.<br>Filter zurücksetzen oder Suchbegriff ergänzen."
-            : "Warte auf den ersten Sammellauf …<br>Quellen links anklicken, um sofort zu sammeln."
-        }
-      </div>`;
-    return;
-  }
-
-  if (variant === "grid") {
-    el.innerHTML = posts.map((p) => squareCard(p)).join("");
-    return;
-  }
-  el.innerHTML = posts.map((p) => postCard(p)).join("");
-  attachExpand(el);
-}
-
 /** Klick auf gekürzten Text klappt ihn auf. */
 export function attachExpand(el: HTMLElement): void {
   el.querySelectorAll<HTMLElement>(".post-text").forEach((node) => {
