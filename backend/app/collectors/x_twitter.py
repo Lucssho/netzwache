@@ -12,6 +12,7 @@ statt die Sammelschleife mit Fehlern zu fluten.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -110,9 +111,7 @@ class XCollector(BaseCollector):
                     resp = await self._get(
                         f"{base}/search/rss", params={"f": "tweets", "q": term}
                     )
-                    feed = feedparser.parse(resp.text)
-                    for e in feed.entries[:15]:
-                        items.append(self._nitter_item(e, term))
+                    items.extend(await asyncio.to_thread(self._parse_nitter, resp.text, term))
                     got = True
                     break
                 except CollectorError as exc:
@@ -122,6 +121,11 @@ class XCollector(BaseCollector):
         if not items and errors:
             raise CollectorError("Nitter nicht erreichbar: " + "; ".join(errors[:2]))
         return items
+
+    def _parse_nitter(self, content: str, term: str) -> list[RawItem]:
+        """XML-Parsing + HTML-Bereinigung - CPU-lastig, läuft per to_thread."""
+        feed = feedparser.parse(content)
+        return [self._nitter_item(e, term) for e in feed.entries[:15]]
 
     def _nitter_item(self, e, term: str) -> RawItem:
         link = (e.get("link") or "").replace("nitter.net", "x.com")

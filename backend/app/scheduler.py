@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import multiprocessing
 import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -26,6 +28,24 @@ from .models import EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, 
 from .seed import seed_categories
 
 log = logging.getLogger("netzwache.scheduler")
+
+
+def _enrich_batch(entries: list[tuple[str, str, str]], terms: list[str]) -> list[dict]:
+    """Reichert mehrere Items in einem Rutsch an - läuft in einem separaten
+    Prozess (ProcessPoolExecutor), damit die CPU-lastige Regex-/Keyword-Arbeit
+    in enrich.py nicht um den GIL mit dem Event-Loop-Thread konkurriert. Ein
+    Thread (asyncio.to_thread) hätte hier nicht gereicht: CPU-lastige Arbeit
+    hält den GIL fast durchgehend, wodurch der Event-Loop-Thread trotzdem
+    kaum zum Zug kommt - nur ein echter Prozess umgeht das."""
+    return [enrich(text, title, hint, terms) for text, title, hint in entries]
+
+
+# "spawn" statt "fork": plattformunabhängig (Tests laufen auch unter Windows)
+# und vermeidet, dass Worker-Prozesse bereits offene DB-/Redis-Verbindungen
+# des Elternprozesses per fork() erben. Als Modul-Singleton angelegt, damit
+# nicht bei jedem Engine.start()/stop()-Zyklus (z.B. in Tests) ein neuer
+# Prozess-Pool auf- und abgebaut wird.
+_enrich_pool = ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context("spawn"))
 
 
 class Engine:
@@ -308,23 +328,50 @@ class Engine:
             )
 
     async def _store(self, items: list[RawItem], terms: list[str]) -> list[dict]:
-        """Dedupliziert, reichert an und schreibt in die DB."""
+        """Dedupliziert, reichert an und schreibt in die DB.
+
+        Dedup (Redis) und Anreicherung (CPU-lastig: Regex/Keyword-Matching in
+        enrich.py) laufen bewusst OHNE offene DB-Session - eine gepoolte
+        Connection soll nur für die eigentlichen Schreibzugriffe belegt sein,
+        nicht während des ganzen Laufs blockiert werden. Die Anreicherung
+        selbst läuft gebündelt in einem separaten Prozess (ProcessPoolExecutor,
+        siehe _enrich_pool), nicht nur einem Thread: CPU-lastige Arbeit hält
+        den GIL fast durchgehend, ein Thread hätte den Event-Loop also kaum
+        entlastet - nur ein echter Prozess umgeht das.
+        """
         out: list[dict] = []
         if not items:
             return out
-        async with SessionLocal() as s:
-            for it in items:
-                text = normalize(it.text)
-                if not text and not it.title:
-                    continue
-                h = content_hash(it.platform, it.external_id, text)
-                if await dedup.seen(h):
-                    continue
-                fp = text_fingerprint(f"{it.title} {text}")
-                if await dedup.seen(f"fp:{fp}"):
-                    continue
 
-                meta = enrich(text, it.title, it.category_hint, terms)
+        # Phase 1: Dedup (kein DB-Session nötig - dedup läuft über Redis)
+        candidates: list[tuple[RawItem, str, str]] = []
+        for it in items:
+            text = normalize(it.text)
+            if not text and not it.title:
+                continue
+            h = content_hash(it.platform, it.external_id, text)
+            if await dedup.seen(h):
+                continue
+            fp = text_fingerprint(f"{it.title} {text}")
+            if await dedup.seen(f"fp:{fp}"):
+                continue
+            candidates.append((it, text, h))
+
+        if not candidates:
+            return out
+
+        # Phase 2: Anreicherung - CPU-lastig, gebündelt in einem separaten Prozess
+        loop = asyncio.get_running_loop()
+        metas = await loop.run_in_executor(
+            _enrich_pool,
+            _enrich_batch,
+            [(text, it.title, it.category_hint) for it, text, _ in candidates],
+            terms,
+        )
+
+        # Phase 3: DB-Session nur für den eigentlichen Schreibzugriff öffnen
+        async with SessionLocal() as s:
+            for (it, text, h), meta in zip(candidates, metas):
                 post = Post(
                     platform=it.platform,
                     source=it.source or it.platform,

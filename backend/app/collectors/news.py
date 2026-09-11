@@ -6,6 +6,7 @@ nach den vier Zielkategorien sortiert.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -74,33 +75,43 @@ class NewsCollector(BaseCollector):
             except CollectorError as exc:
                 errors.append(f"{label}: {exc}")
                 continue
-            feed = feedparser.parse(resp.content)
-            for e in feed.entries[:15]:
-                title = strip_html(e.get("title") or "", 500)
-                summary = strip_html(e.get("summary") or e.get("description") or "")
-                if summary.strip().lower() == title.strip().lower():
-                    summary = ""
-                blob = f"{title} {summary}".lower()
-                if low_terms and not settings.news_keep_all:
-                    if not any(t in blob for t in low_terms):
-                        continue
-                st = e.get("published_parsed") or e.get("updated_parsed")
-                created = datetime(*st[:6], tzinfo=timezone.utc) if st else self._now()
-                items.append(
-                    RawItem(
-                        platform="news",
-                        external_id=f"news:{e.get('id') or e.get('link','')}",
-                        title=title,
-                        text=summary or title,
-                        url=e.get("link", ""),
-                        author=label,
-                        author_handle=label,
-                        source=label,
-                        category_hint=category,
-                        created_at=created,
-                        raw={"feed": url},
-                    )
-                )
+            items.extend(
+                await asyncio.to_thread(self._parse_feed, resp.content, label, url, category, low_terms)
+            )
         if not items and errors:
             raise CollectorError("; ".join(errors[:3]))
         return items
+
+    def _parse_feed(
+        self, content: bytes, label: str, url: str, category: str, low_terms: list[str]
+    ) -> list[RawItem]:
+        """XML-Parsing + HTML-Bereinigung - CPU-lastig, läuft per to_thread."""
+        feed = feedparser.parse(content)
+        out: list[RawItem] = []
+        for e in feed.entries[:15]:
+            title = strip_html(e.get("title") or "", 500)
+            summary = strip_html(e.get("summary") or e.get("description") or "")
+            if summary.strip().lower() == title.strip().lower():
+                summary = ""
+            blob = f"{title} {summary}".lower()
+            if low_terms and not settings.news_keep_all:
+                if not any(t in blob for t in low_terms):
+                    continue
+            st = e.get("published_parsed") or e.get("updated_parsed")
+            created = datetime(*st[:6], tzinfo=timezone.utc) if st else self._now()
+            out.append(
+                RawItem(
+                    platform="news",
+                    external_id=f"news:{e.get('id') or e.get('link','')}",
+                    title=title,
+                    text=summary or title,
+                    url=e.get("link", ""),
+                    author=label,
+                    author_handle=label,
+                    source=label,
+                    category_hint=category,
+                    created_at=created,
+                    raw={"feed": url},
+                )
+            )
+        return out

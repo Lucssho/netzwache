@@ -11,6 +11,7 @@ Ohne Konfiguration meldet der Adapter sauber "inaktiv".
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -94,7 +95,11 @@ class FacebookCollector(BaseCollector):
 
     async def _fetch_bridge(self, terms: list[str]) -> list[RawItem]:
         resp = await self._get(settings.rssbridge_url)
-        feed = feedparser.parse(resp.text)
+        return await asyncio.to_thread(self._parse_bridge, resp.text)
+
+    def _parse_bridge(self, content: str) -> list[RawItem]:
+        """XML-Parsing + HTML-Bereinigung - CPU-lastig, läuft per to_thread."""
+        feed = feedparser.parse(content)
         items: list[RawItem] = []
         for e in feed.entries[:25]:
             st = e.get("published_parsed")

@@ -8,6 +8,7 @@ wird.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -46,13 +47,16 @@ class GoogleNewsCollector(BaseCollector):
             except CollectorError as exc:
                 errors.append(f"{term}: {exc}")
                 continue
-            feed = feedparser.parse(resp.content)
-            for e in feed.entries[:15]:
-                items.append(self._to_item(e, term))
+            items.extend(await asyncio.to_thread(self._parse_feed, resp.content, term))
 
         if not items and errors:
             raise CollectorError("; ".join(errors[:3]))
         return items
+
+    def _parse_feed(self, content: bytes, term: str) -> list[RawItem]:
+        """XML-Parsing + HTML-Bereinigung - CPU-lastig, läuft per to_thread."""
+        feed = feedparser.parse(content)
+        return [self._to_item(e, term) for e in feed.entries[:15]]
 
     def _to_item(self, e: dict, term: str) -> RawItem:
         source = (e.get("source") or {}).get("title", "")

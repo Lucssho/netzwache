@@ -10,6 +10,7 @@ Beiträge aus den konfigurierten Subreddits.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -89,7 +90,11 @@ class RedditCollector(BaseCollector):
 
     async def _rss_fallback(self, term: str) -> list[RawItem]:
         resp = await self._get_with_backoff(f"{PUBLIC}/search.rss", params={"q": term, "sort": "new"})
-        feed = feedparser.parse(resp.text)
+        return await asyncio.to_thread(self._parse_rss, resp.text, term)
+
+    def _parse_rss(self, content: str, term: str) -> list[RawItem]:
+        """XML-Parsing + HTML-Bereinigung - CPU-lastig, läuft per to_thread."""
+        feed = feedparser.parse(content)
         out: list[RawItem] = []
         for e in feed.entries[:20]:
             link = e.get("link", "")
@@ -137,7 +142,7 @@ class RedditCollector(BaseCollector):
         for term in terms[:8]:
             try:
                 rows = await self._listing("/search", {"q": term, "sort": "new", "limit": 15, "t": "day"})
-                items.extend(self._to_item(r, term) for r in rows)
+                items.extend(await asyncio.to_thread(self._to_items, rows, term))
             except CollectorError as exc:
                 log.debug("Reddit-Suche '%s' fehlgeschlagen: %s", term, exc)
                 try:
@@ -149,13 +154,17 @@ class RedditCollector(BaseCollector):
         for sub in settings.subreddit_list[:10]:
             try:
                 rows = await self._listing(f"/r/{sub}/new", {"limit": 10})
-                items.extend(self._to_item(r, "") for r in rows)
+                items.extend(await asyncio.to_thread(self._to_items, rows, ""))
             except CollectorError as exc:
                 errors.append(f"r/{sub}: {exc}")
 
         if not items and errors:
             raise CollectorError("; ".join(errors[:3]))
         return items
+
+    def _to_items(self, rows: list[dict], term: str) -> list[RawItem]:
+        """HTML-Bereinigung mehrerer Einträge - CPU-lastig, läuft per to_thread."""
+        return [self._to_item(r, term) for r in rows]
 
     def _to_item(self, r: dict, term: str) -> RawItem:
         created = r.get("created_utc")
