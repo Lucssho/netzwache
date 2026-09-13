@@ -221,6 +221,63 @@ Die Tests brauchen weder Netz noch Postgres noch Redis – SQLite und In-Memory-
 
 ---
 
+## Wo und wie die Daten gespeichert werden
+
+**Speicherort:** Postgres 16 im Docker-Setup - ein eigener `db`-Container, dessen Daten im
+benannten Docker-Volume `pgdata` liegen (`/var/lib/postgresql/data` im Container). Das
+überlebt `docker compose down`, aber nicht `docker compose down -v` (siehe
+[Schnellstart](#schnellstart-mit-docker-empfohlen)). Für die lokale Entwicklung ohne
+Docker springt SQLite ein (eine einzelne Datei, `./netzwache.db`) - auch die Tests laufen
+ausschließlich gegen SQLite, ganz ohne Netzwerk oder externe Dienste.
+
+Redis (eigener `redis`-Container) speichert **keine** Beitragsinhalte - es hält nur eine
+kurzlebige Menge bereits gesehener `content_hash`-Werte zur Deduplizierung vor
+(`DEDUP_TTL_DAYS`, Standard 14 Tage). Fällt Redis aus, übernimmt ein In-Memory-Fallback
+(siehe `dedup.py`) - weniger robust über einen Neustart hinweg, aber funktionsfähig.
+
+**Was pro Beitrag gespeichert wird** - jeder gesammelte Beitrag landet als eine Zeile in
+der `posts`-Tabelle:
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | Integer, PK | interne, fortlaufende ID |
+| `platform` | String | `bluesky` / `reddit` / `x` / `facebook` / `news` / `googlenews` |
+| `source` | String | z.B. `"r/netsec"`, `"heise-security"`, `"@handle.bsky.social"` |
+| `external_id` | String | ID des Beitrags auf der Original-Plattform |
+| `content_hash` | String, unique | Hash über den Inhalt, für Deduplizierung |
+| `author` / `author_handle` | String | Anzeigename / Handle des Autors |
+| `title` / `text` | Text | Titel (falls vorhanden) und Volltext |
+| `url` | Text | Link zum Original |
+| `lang` | String | Sprachcode, falls von der Quelle geliefert |
+| `created_at` | Timestamp | Original-Zeitpunkt laut Quelle |
+| `collected_at` | Timestamp | Zeitpunkt, zu dem NETZWACHE den Beitrag eingesammelt hat |
+| `categories` | JSON-Array | z.B. `["cybersecurity", "it"]` |
+| `matched_terms` | JSON-Array | welche Suchbegriffe getroffen haben |
+| `keywords` | JSON-Array | automatisch extrahierte Schlagwörter |
+| `cve_ids` | JSON-Array | erkannte CVE-Nummern |
+| `severity` | Integer 0-100 | berechneter Schweregrad |
+| `engagement` | JSON | Likes/Reposts/Kommentare, falls von der Quelle geliefert |
+| `raw` | JSON | unverändertes Rohobjekt der Quelle (Debug/Nachvollziehbarkeit) |
+
+Ein `UNIQUE`-Constraint auf (`platform`, `external_id`) plus ein eindeutiger Index auf
+`content_hash` verhindern doppelte Zeilen, auch wenn derselbe Beitrag über zwei
+Sammel-Läufe oder zwei Quellen hereinkommt.
+
+**Weitere Tabellen:**
+
+| Tabelle | Zweck |
+|---|---|
+| `search_terms` | vom Nutzer verwaltete Suchbegriffe (Text, Kategorie, aktiv/inaktiv, Trefferzähler) |
+| `source_state` | Laufzeit-Status je Quelle (Status, letzter Lauf, Fehlerzähler) - füttert die Statusleiste |
+| `ui_settings` | Key-Value-Speicher für Darstellung (Schriftart, -größe, Dichte, Theme) |
+| `event_log` | kurzes Ereignisprotokoll fürs Dashboard |
+| `categories`, `post_categories`, `post_tags`, `post_cves` | normalisierte m:n-Zuordnungen - siehe nächster Abschnitt |
+
+Alle Tabellen und Indizes werden beim ersten Start automatisch angelegt (`init_db()` in
+`db.py`) - für eine frische Installation ist kein separater Migrationsschritt nötig.
+
+---
+
 ## Datenmodell: Kategorien, Tags & CVEs
 
 `categories`, `matched_terms` und `cve_ids` liegen weiterhin als JSON-Spalten auf `posts`
