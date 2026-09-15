@@ -99,6 +99,13 @@ class NewsCollector(BaseCollector):
                     continue
             st = e.get("published_parsed") or e.get("updated_parsed")
             created = datetime(*st[:6], tzinfo=timezone.utc) if st else self._now()
+            # Datenformat v2: wir scrapen die Publisher-Website nicht - nur
+            # das, was der Feed selbst liefert, siehe README. FeedBurner-
+            # Feeds (z.B. "The Hacker News") liefern die echte Original-URL
+            # zusätzlich zur Feed-eigenen - kostet keinen weiteren Request,
+            # weil sie schon im geparsten Eintrag steht.
+            canonical = e.get("feedburner_origlink") or ""
+            tags = [t.get("term") for t in (e.get("tags") or []) if t.get("term")]
             out.append(
                 RawItem(
                     platform="news",
@@ -112,6 +119,21 @@ class NewsCollector(BaseCollector):
                     category_hint=category,
                     created_at=created,
                     raw={"feed": url},
+                    content_type="article",
+                    content_status="summary" if summary else "title_only",
+                    summary=summary or "",
+                    canonical_url=canonical,
+                    raw_payload={
+                        "feed_label": label,
+                        "feed_url": url,
+                        "entry_id": e.get("id"),
+                        "link": e.get("link"),
+                        "title": e.get("title"),
+                        "summary": e.get("summary") or e.get("description"),
+                        "published": e.get("published") or e.get("updated"),
+                        "tags": tags,
+                        "canonical_url": canonical or None,
+                    },
                 )
             )
         return out

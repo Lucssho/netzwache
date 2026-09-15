@@ -164,7 +164,11 @@ async def get_post(post_id: int, session: AsyncSession = Depends(get_session)) -
     row = await session.get(Post, post_id)
     if not row:
         raise HTTPException(404, "Post nicht gefunden")
-    return row.to_dict()
+    # raw_payload nur hier, nicht in der Liste (siehe Post.to_dict) - beim
+    # Nachschlagen eines einzelnen Posts ist die Bandbreite kein Thema.
+    d = row.to_dict()
+    d["raw_payload"] = row.raw_payload or {}
+    return d
 
 
 # ----------------------------------------------------------------- Stats

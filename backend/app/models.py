@@ -62,9 +62,30 @@ class Post(Base):
     cve_ids: Mapped[list] = mapped_column(JSON, default=list)
     severity: Mapped[int] = mapped_column(Integer, default=0)     # 0..100
     engagement: Mapped[dict] = mapped_column(JSON, default=dict)  # likes/reposts/comments
-    raw: Mapped[dict] = mapped_column(JSON, default=dict)
+    raw: Mapped[dict] = mapped_column(JSON, default=dict)         # legacy: kleine Lauf-Metadaten (mode/term/...), siehe README
+
+    # ------------------------------------------------------------------
+    # Datenformat v2 (siehe README, Abschnitt "Version 1 vs. Version 2").
+    # Alles hier ist NULLABLE und wird NUR von neu gesammelten Beiträgen
+    # gefüllt (scheduler.py::_store setzt data_version=2 explizit) -
+    # Bestandsdaten bleiben unangetastet und lesen als NULL/1/"legacy"
+    # (siehe to_dict() unten). Kein Feld hier wird rückwirkend befüllt.
+    data_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    content_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    content_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_full: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    collector_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    engagement_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    media: Mapped[list | None] = mapped_column(JSON, nullable=True)          # [{"type":..., "url":...}, ...] - nur URLs, keine Binärdaten
+    raw_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)    # sanitisiertes Quellobjekt DIESES Posts, siehe app/payload.py
 
     def to_dict(self) -> dict:
+        # raw_payload bewusst NICHT hier drin - das würde jede /api/posts-Liste
+        # (bis zu 500 Einträge) um bis zu raw_payload_max_bytes pro Zeile
+        # aufblähen. Steht stattdessen nur auf dem Einzel-Post-Endpunkt
+        # (GET /api/posts/{id}, siehe routes.py) zur Verfügung.
         return {
             "id": self.id,
             "platform": self.platform,
@@ -84,6 +105,21 @@ class Post(Base):
             "cve_ids": self.cve_ids or [],
             "severity": self.severity,
             "engagement": self.engagement or {},
+            # --- Datenformat v2 (siehe README) - Bestandsdaten (vor dieser
+            # Erweiterung gesammelt) haben data_version/content_status als
+            # NULL in der DB und werden hier als "1"/"legacy" ausgegeben,
+            # statt roh NULL an die API-Konsumenten weiterzureichen.
+            "data_version": self.data_version if self.data_version is not None else 1,
+            "content_type": self.content_type,
+            "content_status": self.content_status if self.content_status is not None else "legacy",
+            "summary": self.summary,
+            "content_full": self.content_full,
+            "canonical_url": self.canonical_url,
+            "collector_mode": self.collector_mode,
+            "engagement_collected_at": (
+                self.engagement_collected_at.isoformat() if self.engagement_collected_at else None
+            ),
+            "media": self.media or [],
         }
 
 

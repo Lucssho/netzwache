@@ -84,6 +84,35 @@ async def init_db() -> None:
                 text("CREATE INDEX IF NOT EXISTS ix_posts_search_vector ON posts USING GIN (search_vector)")
             )
 
+            # --- Datenformat v2 (siehe README, "Version 1 vs. Version 2") ---
+            # Nur nullable Spalten, kein Backfill, keine API-Aufrufe für
+            # Bestandsdaten - create_all() legt sie für frische Installationen
+            # schon über das Modell an, hier geht es nur um die schon
+            # laufende posts-Tabelle mit ~96k Bestandszeilen.
+            #
+            # data_version bekommt bewusst einen echten Spalten-Default (1)
+            # statt nur NULL zu bleiben: "ADD COLUMN ... DEFAULT <Konstante>"
+            # ist ab Postgres 11 eine reine Metadaten-Operation (kein
+            # Tabellen-Rewrite, keine lange exklusive Sperre), obwohl davon
+            # alle Bestandszeilen betroffen sind - Version 2 wird trotzdem nie
+            # rückwirkend vergeben, das setzt ausschließlich scheduler.py::
+            # _store() für tatsächlich neu gesammelte Beiträge.
+            await conn.execute(
+                text("ALTER TABLE posts ADD COLUMN IF NOT EXISTS data_version INTEGER DEFAULT 1")
+            )
+            for column_sql in (
+                "content_type VARCHAR(32)",
+                "content_status VARCHAR(16)",
+                "summary TEXT",
+                "content_full TEXT",
+                "canonical_url TEXT",
+                "collector_mode VARCHAR(16)",
+                "engagement_collected_at TIMESTAMPTZ",
+                "media JSON",
+                "raw_payload JSON",
+            ):
+                await conn.execute(text(f"ALTER TABLE posts ADD COLUMN IF NOT EXISTS {column_sql}"))
+
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as session:

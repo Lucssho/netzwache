@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # _effective_size_limits). 0 = Größenlimit deaktiviert.
     max_posts_size_gb: float = 15.0
     posts_trim_chunk_mb: float = 100.0
+    # Obergrenze für raw_payload je Post (siehe app/payload.py) - verhindert,
+    # dass ein einzelner, ungewöhnlich großer Quelldatensatz (z.B. ein
+    # Reddit-Post mit riesigem JSON-Anhang) den Speicherbedarf einer einzigen
+    # Zeile sprengt. Nur ein Sicherheitsnetz - normale Posts bleiben weit
+    # darunter.
+    raw_payload_max_bytes: int = 20_000
 
     # --- Intervalle je Quelle (Sekunden, respektiert Rate-Limits) -------
     interval_bluesky: int = 300

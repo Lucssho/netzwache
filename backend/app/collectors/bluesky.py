@@ -83,7 +83,7 @@ class BlueskyCollector(BaseCollector):
         log.info("Bluesky-Session erneuert für %s", settings.bluesky_handle)
         return self._jwt
 
-    async def _search(self, term: str, limit: int) -> list[dict]:
+    async def _search(self, term: str, limit: int) -> tuple[list[dict], str]:
         jwt = await self._ensure_session()
         params = {"q": term, "limit": limit, "sort": "latest"}
         if jwt:
@@ -97,7 +97,7 @@ class BlueskyCollector(BaseCollector):
                 f"{settings.bluesky_public_api}/xrpc/app.bsky.feed.searchPosts",
                 params=params,
             )
-        return resp.json().get("posts", [])
+        return resp.json().get("posts", []), ("authenticated" if jwt else "public")
 
     # ------------------------------------------------------------------
     async def fetch(self, terms: list[str]) -> list[RawItem]:
@@ -112,18 +112,43 @@ class BlueskyCollector(BaseCollector):
 
         for term in terms:
             try:
-                posts = await self._search(term, per_term)
+                posts, mode = await self._search(term, per_term)
             except CollectorError as exc:
                 errors.append(f"{term}: {exc}")
                 continue
             for p in posts:
-                items.append(self._to_item(p, term))
+                items.append(self._to_item(p, term, mode))
 
         if not items and errors:
             raise CollectorError("; ".join(errors[:3]))
         return items
 
-    def _to_item(self, p: dict, term: str) -> RawItem:
+    @staticmethod
+    def _extract_media(embed: dict | None) -> list[dict]:
+        """Nur URLs/Metadaten aus dem (schon aufgelösten) Embed der API-
+        Antwort - nie Binärdaten. Deckt die drei häufigen Embed-Arten ab:
+        Bilder, externe Link-Karten, zitierte Posts."""
+        if not embed:
+            return []
+        t = embed.get("$type", "")
+        out: list[dict] = []
+        if "images" in t:
+            for img in embed.get("images", []) or []:
+                url = img.get("fullsize") or img.get("thumb", "")
+                if url:
+                    out.append({"type": "image", "url": url, "alt": img.get("alt", "")})
+        elif "external" in t:
+            ext = embed.get("external", {}) or {}
+            if ext.get("uri"):
+                out.append({"type": "external_link", "url": ext["uri"], "title": ext.get("title", "")})
+        elif "record" in t:
+            rec = embed.get("record", {}) or {}
+            uri = rec.get("uri") or (rec.get("record") or {}).get("uri", "")
+            if uri:
+                out.append({"type": "quoted_post", "url": uri})
+        return out
+
+    def _to_item(self, p: dict, term: str, mode: str = "public") -> RawItem:
         record = p.get("record", {}) or {}
         author = p.get("author", {}) or {}
         handle = author.get("handle", "")
@@ -138,10 +163,11 @@ class BlueskyCollector(BaseCollector):
             created_at = created_at.replace(tzinfo=timezone.utc)
 
         langs = record.get("langs") or []
+        text = record.get("text", "")
         return RawItem(
             platform="bluesky",
             external_id=uri or f"bsky:{rkey}",
-            text=record.get("text", ""),
+            text=text,
             url=f"https://bsky.app/profile/{handle}/post/{rkey}" if handle and rkey else "",
             author=author.get("displayName") or handle,
             author_handle=handle,
@@ -155,4 +181,14 @@ class BlueskyCollector(BaseCollector):
                 "quotes": p.get("quoteCount", 0),
             },
             raw={"cid": p.get("cid"), "term": term},
+            # Datenformat v2: Bluesky liefert immer den kompletten Post-Text
+            # (kein separates "Volltext nachladen" nötig) - reines Erreichen
+            # des Plattform-eigenen Zeichenlimits zählt NICHT als
+            # abgeschnitten, siehe README.
+            content_type="post",
+            content_status="full",
+            content_full=text,
+            collector_mode=mode,
+            media=self._extract_media(p.get("embed")),
+            raw_payload=p,
         )

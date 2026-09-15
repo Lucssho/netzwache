@@ -25,6 +25,7 @@ from .dedup import dedup
 from .enrich import content_hash, enrich, normalize, text_fingerprint
 from .hub import hub
 from .models import EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState, UiSetting
+from .payload import sanitize_raw_payload
 from .seed import seed_categories
 
 log = logging.getLogger("netzwache.scheduler")
@@ -372,6 +373,11 @@ class Engine:
         # Phase 3: DB-Session nur für den eigentlichen Schreibzugriff öffnen
         async with SessionLocal() as s:
             for (it, text, h), meta in zip(candidates, metas):
+                # Datenformat v2 (siehe README) - nur für Beiträge, die HIER,
+                # jetzt, tatsächlich neu gesammelt werden. Bestandsdaten
+                # (data_version NULL/1) werden nie rückwirkend angefasst -
+                # dieser Codepfad läuft ausschließlich für frisch abgerufene
+                # RawItems aus den Collectoren.
                 post = Post(
                     platform=it.platform,
                     source=it.source or it.platform,
@@ -386,7 +392,24 @@ class Engine:
                     created_at=it.created_at,
                     collected_at=datetime.now(timezone.utc),
                     engagement=it.engagement,
+                    # Zeitpunkt DER BEOBACHTUNG, nicht irgendein späterer
+                    # Abgleich - wir tracken Engagement nur als Momentaufnahme
+                    # zum Sammelzeitpunkt, keine laufende Nachverfolgung (siehe
+                    # README). Leer, wenn der Collector gar keine
+                    # Engagement-Werte geliefert hat (nicht 0/jetzt vortäuschen).
+                    engagement_collected_at=datetime.now(timezone.utc) if it.engagement else None,
                     raw=it.raw,
+                    data_version=2,
+                    content_type=it.content_type or None,
+                    content_status=it.content_status or None,
+                    summary=it.summary or None,
+                    content_full=it.content_full or None,
+                    canonical_url=it.canonical_url or None,
+                    collector_mode=it.collector_mode or None,
+                    media=it.media or None,
+                    raw_payload=sanitize_raw_payload(it.raw_payload, settings.raw_payload_max_bytes)
+                    if it.raw_payload
+                    else None,
                     **meta,
                 )
                 # Savepoint: ein kollidierender Datensatz darf die anderen

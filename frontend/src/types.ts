@@ -19,6 +19,19 @@ export interface Post {
   cve_ids: string[];
   severity: number;
   engagement: Record<string, number>;
+  // Datenformat v2 (siehe README, "Version 1 vs. Version 2") - bei
+  // Bestandsposten (vor dieser Erweiterung gesammelt) sind die meisten
+  // davon null bzw. data_version=1/content_status="legacy". Vom Frontend
+  // aktuell nirgends ausgewertet - nur für zukünftige Verwendung typisiert.
+  data_version: number;
+  content_type: string | null;
+  content_status: string;
+  summary: string | null;
+  content_full: string | null;
+  canonical_url: string | null;
+  collector_mode: string | null;
+  engagement_collected_at: string | null;
+  media: Array<{ type: string; url: string; [key: string]: unknown }>;
 }
 
 export interface SourceState {

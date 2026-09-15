@@ -78,6 +78,45 @@ class RawItem:
     category_hint: str = ""
     raw: dict = field(default_factory=dict)
 
+    # ---------------------------------------------------------------
+    # Datenformat v2 (siehe README, Abschnitt "Version 1 vs. Version 2").
+    # Nur für NEU gesammelte Beiträge gefüllt - Bestandsdaten (vor dieser
+    # Erweiterung gesammelt) bleiben unangetastet und laufen weiter als
+    # Version 1 (siehe scheduler.py::_store, models.py::Post).
+    #
+    # content_type: grobe Art des Beitrags - "post" (Social-Media-Beitrag),
+    #   "self_post"/"link_post" (Reddit), "article" (RSS/News/Google News).
+    # content_status: beschreibt den TATSÄCHLICH gespeicherten Inhalt, nicht
+    #   was der Collector sich erhofft hat - siehe enrich-Doku/README:
+    #   "full" | "summary" | "title_only" | "unavailable".
+    # summary: eigenständige Kurzfassung, NUR wenn sie sich von `text`
+    #   unterscheidet (z.B. eine RSS-Beschreibung) - sonst leer, um keinen
+    #   Text doppelt zu speichern.
+    # content_full: der vollständige Beitragstext, NUR wenn content_status
+    #   "full" ist - sonst leer (kein Duplikat von `text`, wenn wir gar
+    #   keinen vollständigeren Inhalt haben als das, was schon dort steht).
+    # canonical_url: aufgelöste Original-URL, nur wenn das ohne zusätzlichen
+    #   Netzwerk-Request möglich ist (z.B. FeedBurner-origLink) - bei
+    #   Social-Media-Plattformen ist `url` selbst schon kanonisch, deshalb
+    #   dort leer.
+    # collector_mode: z.B. "oauth"/"public"/"rss" (Reddit), "api"/"nitter"
+    #   (X), "graph"/"rss_bridge" (Facebook), "public"/"authenticated"
+    #   (Bluesky) - leer, wenn eine Plattform nur einen Modus kennt.
+    # media: Liste von {"type":..., "url":..., ...} - nur URLs/Metadaten,
+    #   nie Binärdaten.
+    # raw_payload: das rohe, EINZELNE Quellobjekt dieses einen Beitrags
+    #   (nicht die ganze Mehr-Posts-API-Antwort) - wird zentral in
+    #   scheduler.py::_store() über payload.sanitize_raw_payload()
+    #   bereinigt und größenbegrenzt, bevor es gespeichert wird.
+    content_type: str = "post"
+    content_status: str = "full"
+    summary: str = ""
+    content_full: str = ""
+    canonical_url: str = ""
+    collector_mode: str = ""
+    media: list = field(default_factory=list)
+    raw_payload: dict = field(default_factory=dict)
+
 
 class CollectorError(RuntimeError):
     """Fachlicher Fehler eines Collectors (wird im Status angezeigt)."""

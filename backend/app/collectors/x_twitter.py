@@ -78,11 +78,12 @@ class XCollector(BaseCollector):
             except Exception:
                 created = self._now()
             m = t.get("public_metrics", {})
+            text = t.get("text", "")
             items.append(
                 RawItem(
                     platform="x",
                     external_id=f"x:{t['id']}",
-                    text=t.get("text", ""),
+                    text=text,
                     url=f"https://x.com/{handle}/status/{t['id']}" if handle else f"https://x.com/i/status/{t['id']}",
                     author=u.get("name", handle),
                     author_handle=f"@{handle}" if handle else "",
@@ -96,6 +97,14 @@ class XCollector(BaseCollector):
                         "quotes": m.get("quote_count", 0),
                     },
                     raw={"mode": "api"},
+                    # Die offizielle API liefert immer den vollständigen
+                    # Tweet-Text - Erreichen des Plattform-Zeichenlimits zählt
+                    # nicht als abgeschnitten (siehe README).
+                    content_type="post",
+                    content_status="full",
+                    content_full=text,
+                    collector_mode="api",
+                    raw_payload={**t, "_author": u},
                 )
             )
         return items
@@ -134,14 +143,23 @@ class XCollector(BaseCollector):
         st = e.get("published_parsed")
         created = datetime(*st[:6], tzinfo=timezone.utc) if st else self._now()
         creator = e.get("author") or e.get("dc_creator") or ""
+        text = strip_html(e.get("description") or e.get("title", ""))
         return RawItem(
             platform="x",
             external_id=f"x:{e.get('id') or e.get('link','')}",
-            text=strip_html(e.get("description") or e.get("title", "")),
+            text=text,
             url=link,
             author=creator,
             author_handle=creator if creator.startswith("@") else (f"@{creator}" if creator else ""),
             source="x/nitter",
             created_at=created,
             raw={"mode": "nitter", "term": term},
+            # Ein Nitter-RSS-Eintrag enthält den tatsächlichen Tweet-Text
+            # (Tweets sind kurz genug, dass RSS ihn nicht kürzt) - anders als
+            # bei einem Artikel-Feed ist das hier schon der volle Inhalt.
+            content_type="post",
+            content_status="full",
+            content_full=text,
+            collector_mode="nitter",
+            raw_payload={"id": e.get("id"), "link": link, "title": e.get("title"), "description": e.get("description"), "author": creator},
         )

@@ -70,6 +70,11 @@ class GoogleNewsCollector(BaseCollector):
             summary = ""
         st = e.get("published_parsed") or e.get("updated_parsed")
         created = datetime(*st[:6], tzinfo=timezone.utc) if st else self._now()
+        # Datenformat v2: `link` ist eine Google-Weiterleitung, keine
+        # Publisher-URL - sie ohne weiteren Request aufzulösen geht bei
+        # Google News nicht zuverlässig (die Umleitung läuft per JavaScript,
+        # nicht per HTTP-Redirect), deshalb bleibt canonical_url hier bewusst
+        # leer statt eine falsche URL zu behaupten (siehe README).
         return RawItem(
             platform="googlenews",
             external_id=f"googlenews:{e.get('id') or e.get('link', '')}",
@@ -80,4 +85,16 @@ class GoogleNewsCollector(BaseCollector):
             source=source or "Google News",
             created_at=created,
             raw={"term": term, "source": source},
+            content_type="article",
+            content_status="summary" if summary else "title_only",
+            summary=summary or "",
+            raw_payload={
+                "term": term,
+                "source_title": source,
+                "source_url": (e.get("source") or {}).get("href"),
+                "link": e.get("link"),
+                "title": e.get("title"),
+                "summary": e.get("summary") or e.get("description"),
+                "published": e.get("published") or e.get("updated"),
+            },
         )

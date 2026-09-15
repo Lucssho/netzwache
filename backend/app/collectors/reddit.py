@@ -117,6 +117,23 @@ class RedditCollector(BaseCollector):
                     source=f"r/{sub}" if sub else "reddit/rss",
                     created_at=self._parse_struct(e),
                     raw={"mode": "rss", "term": term, "subreddit": sub},
+                    # Datenformat v2: der RSS-Fallback liefert weder Score/
+                    # Kommentare noch verlässlich selftext vs. Linkziel - ehrlich
+                    # als "summary" (falls ein eigener Body da ist) bzw.
+                    # "title_only" kennzeichnen, nicht als vollständig ausgeben.
+                    content_type="post",
+                    content_status="summary" if body else "title_only",
+                    collector_mode="rss",
+                    raw_payload={
+                        "mode": "rss",
+                        "term": term,
+                        "subreddit": sub,
+                        "id": e.get("id"),
+                        "link": link,
+                        "title": e.get("title"),
+                        "summary": e.get("summary"),
+                        "author": author,
+                    },
                 )
             )
         return out
@@ -166,6 +183,16 @@ class RedditCollector(BaseCollector):
         """HTML-Bereinigung mehrerer Einträge - CPU-lastig, läuft per to_thread."""
         return [self._to_item(r, term) for r in rows]
 
+    @staticmethod
+    def _extract_media(r: dict) -> list[dict]:
+        """Nur URL + Art aus Reddits eigenem post_hint - nie Binärdaten."""
+        hint = r.get("post_hint")
+        url = r.get("url_overridden_by_dest") or r.get("url")
+        if not (hint and url):
+            return []
+        kind = {"image": "image", "hosted:video": "video", "rich:video": "video"}.get(hint)
+        return [{"type": kind, "url": url}] if kind else []
+
     def _to_item(self, r: dict, term: str) -> RawItem:
         created = r.get("created_utc")
         created_at = (
@@ -176,12 +203,37 @@ class RedditCollector(BaseCollector):
         sub = r.get("subreddit", "")
         title = strip_html(r.get("title", ""), 500)
         body = strip_html(r.get("selftext") or "")
+        permalink = "https://www.reddit.com" + r.get("permalink", "") if r.get("permalink") else r.get("url", "")
+
+        # Datenformat v2: Reddit sagt uns über is_self direkt, ob es ein
+        # Text-Beitrag ist oder auf ein externes Ziel verlinkt - siehe README.
+        # Ein Link-Post hat keinen eigenen Volltext, den wir "voll" nennen
+        # dürften (das externe Ziel wird bewusst NICHT nachgeladen).
+        is_self = r.get("is_self")
+        if is_self is None:
+            # Reddits eigene Listings liefern is_self immer - nur als
+            # Rückfall, falls doch mal eine Quelle das Feld weglässt.
+            is_self = bool(r.get("selftext"))
+        if is_self:
+            content_type = "self_post"
+            content_status = "full" if body else "title_only"
+            content_full = body or None
+            canonical_url = ""
+        else:
+            content_type = "link_post"
+            content_status = "title_only"
+            content_full = None
+            # Externes Linkziel getrennt vom Reddit-eigenen Permalink
+            # (der weiterhin in `url` steht, wie bisher) - siehe README.
+            external = r.get("url") or r.get("url_overridden_by_dest") or ""
+            canonical_url = external if external and external != permalink else ""
+
         return RawItem(
             platform="reddit",
             external_id=r.get("name") or f"t3_{r.get('id','')}",
             title=title,
             text=body or title,
-            url="https://www.reddit.com" + r.get("permalink", "") if r.get("permalink") else r.get("url", ""),
+            url=permalink,
             author=r.get("author", ""),
             author_handle=f"u/{r.get('author','')}" if r.get("author") else "",
             source=f"r/{sub}" if sub else "reddit",
@@ -192,4 +244,11 @@ class RedditCollector(BaseCollector):
                 "ratio": r.get("upvote_ratio", 0),
             },
             raw={"mode": self._mode, "term": term, "subreddit": sub, "flair": r.get("link_flair_text")},
+            content_type=content_type,
+            content_status=content_status,
+            content_full=content_full,
+            canonical_url=canonical_url,
+            collector_mode=self._mode,
+            media=self._extract_media(r),
+            raw_payload=r,
         )
