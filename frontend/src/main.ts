@@ -69,6 +69,19 @@ applySettings(state.settings);
 // app.innerHTML weiter unten - das Attribut hier reicht aber schon für CSS.
 document.documentElement.dataset.effects = getLowEffects() ? "low" : "full";
 
+// In einem iFrame (z.B. eingebettet auf einer fremden Website) übernimmt die
+// einbettende Seite ihre eigene Hintergrundfarbe - der sonst hier gemalte
+// Desktop-Hintergrund (siehe styles.css: body { background: var(--page-bg) })
+// würde das schwebende Fenster sonst auf ein eigenes weißes/dunkles Rechteck
+// stellen statt es transparent über der Seite schweben zu lassen. window.top
+// wirft bei Cross-Origin-iFrames eine SecurityError-Exception statt nur
+// undefined zurückzugeben - daher try/catch statt eines einfachen Vergleichs.
+try {
+  if (window.self !== window.top) document.documentElement.dataset.embedded = "true";
+} catch {
+  document.documentElement.dataset.embedded = "true";
+}
+
 // ---------------------------------------------------------------- Gerüst
 const app = document.getElementById("app")!;
 app.innerHTML = `
