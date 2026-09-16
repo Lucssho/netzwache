@@ -330,11 +330,19 @@ function renderTabs(): void {
       // Panel muss deshalb an die tatsächliche Bildschirmposition des
       // Buttons angeheftet werden, sonst würde es vom selben Scroll-
       // Container abgeschnitten (siehe Kommentar in styles.css).
+      panel.style.display = "flex"; // vor der Breitenmessung sichtbar machen (display:none => offsetWidth 0)
       const rect = btn.getBoundingClientRect();
+      const margin = 8;
+      // Nach rechts geklemmt: auf sehr schmalen Bildschirmen (Handy) sitzt
+      // der "Mehr"-Button oft nahe am rechten Rand des gescrollten Tab-
+      // Streifens - ohne Klemmen würde das Panel dort über den Viewport-
+      // Rand hinausragen, statt vollständig sichtbar zu bleiben.
+      const left = Math.min(rect.left, window.innerWidth - panel.offsetWidth - margin);
       panel.style.top = `${rect.bottom + 6}px`;
-      panel.style.left = `${rect.left}px`;
+      panel.style.left = `${Math.max(margin, left)}px`;
+    } else {
+      panel.style.display = "none";
     }
-    panel.style.display = opening ? "flex" : "none";
   });
   els.tabCategory.querySelectorAll<HTMLElement>(".tab").forEach((b) =>
     b.addEventListener("click", () => {
