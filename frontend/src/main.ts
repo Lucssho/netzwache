@@ -43,7 +43,7 @@ const state = {
   settings: { ...DEFAULT_SETTINGS } as UiSettings,
   isAdmin: false,
   sourcesOpen: false,
-  leftColOpen: false,
+  leftColOpen: true,
   lagebildOpen: false,
   feedVariant: "list" as FeedVariant,
   resurfacedPostId: null as number | null,
@@ -86,9 +86,6 @@ try {
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <header class="top">
-    <div class="traffic" title="CYBER SHIELD">
-      <i class="tr-red"></i><i class="tr-amber"></i><i class="tr-green" id="tr-green"></i>
-    </div>
     <div id="header-inner"></div>
   </header>
 
@@ -127,12 +124,12 @@ app.innerHTML = `
     </div>
   </div>
 
-  <div class="main left-collapsed right-collapsed" id="main-grid">
+  <div class="main right-collapsed" id="main-grid">
     <div class="col col-left">
-      <div class="col-outer collapsed" id="col-outer-left">
+      <div class="col-outer" id="col-outer-left">
         <div class="col-outer-head">
           <span class="panel-title" id="left-outer-title">Suchraum</span>
-          <button id="btn-leftcol-toggle" class="icon-btn collapse-toggle flip" title="Suchraum ein-/ausblenden">
+          <button id="btn-leftcol-toggle" class="icon-btn collapse-toggle" title="Suchraum ein-/ausblenden">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
               <path d="M7 3.5 3.5 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
               <path d="M10.5 3.5 7 7l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -216,7 +213,6 @@ app.innerHTML = `
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const els = {
   headerInner: $("header-inner"),
-  trGreen: $("tr-green"),
   tabPlatform: $("tab-platform"),
   tabCategory: $("tab-category"),
   search: $<HTMLInputElement>("search"),
@@ -332,6 +328,7 @@ function renderTabs(): void {
     b.addEventListener("click", () => {
       state.filters.category = b.dataset.v!;
       renderTabs();
+      paintTerms();
       void reloadPosts();
       void refreshStats();
     }),
@@ -393,14 +390,6 @@ function matchesFilter(p: Post): boolean {
 function hasActiveFilter(): boolean {
   const f = state.filters;
   return f.platform !== "all" || f.category !== "all" || !!f.query || f.minSeverity > 0 || !!f.focusTerm;
-}
-
-function filterLabel(): string {
-  const f = state.filters;
-  const parts = [f.platform, f.category].filter((x) => x !== "all");
-  if (f.focusTerm) parts.push(`#${f.focusTerm}`);
-  if (f.query) parts.push(`"${f.query}"`);
-  return parts.length ? parts.join(",") : "alle";
 }
 
 // -------------------------------------------------------------- Fokus-Modus
@@ -545,10 +534,7 @@ function paintHeader(): void {
     connected: state.connected,
     nextTick: state.nextTick,
     tickSeconds: state.tickSeconds,
-    filterLabel: filterLabel(),
   });
-  els.trGreen.classList.toggle("live", state.connected);
-  els.trGreen.classList.toggle("pulse", state.connected);
 }
 
 function paintSources(): void {
@@ -639,10 +625,18 @@ function paintTerms(freshId?: number): void {
         paintTerms();
       },
       onFocus: (term) => setFocusTerm(term),
+      onCategoryFilter: (category) => {
+        state.filters.category = category;
+        renderTabs();
+        paintTerms();
+        void reloadPosts();
+        void refreshStats();
+      },
     },
     state.filters.focusTerm,
     state.isAdmin,
     freshId,
+    state.filters.category,
   );
 }
 

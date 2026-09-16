@@ -8,7 +8,6 @@ export function renderHeader(
     connected: boolean;
     nextTick: number;
     tickSeconds: number;
-    filterLabel: string;
   },
 ): void {
   const pct = s.tickSeconds ? 1 - s.nextTick / s.tickSeconds : 0;
@@ -18,14 +17,7 @@ export function renderHeader(
   el.innerHTML = `
     <div class="brand">
       <img class="ifis-logo" src="/favicon.png" alt="if(is) - Institut für Internet-Sicherheit" />
-      <div class="brand-text">
-        <h1>Cyber Shield</h1>
-        <div class="sub">Multi-Plattform Lagebild &middot; OSINT Collector</div>
-      </div>
-    </div>
-
-    <div class="prompt">
-      <b>root@netzwache</b>:<b>~</b># collect --sources=all --filter=${s.filterLabel}<span class="cursor"></span>
+      <h1 class="brand-title">Foren-News <span class="accent">Analyse</span></h1>
     </div>
 
     <div class="head-stats">

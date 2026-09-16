@@ -14,6 +14,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Aktion verloren gehen.
 let tagSearch = "";
 let tagCategoryFilter = ""; // "" = kein Kategorie-Filter (alle anzeigen)
+let lastActiveCategory = ""; // zuletzt gesehener Themen-Tab (oben), um einen Wechsel zu erkennen
 
 export function renderTerms(
   el: HTMLElement,
@@ -23,11 +24,24 @@ export function renderTerms(
     onDelete: (id: number) => void;
     onToggle: (id: number, enabled: boolean) => void;
     onFocus: (term: string) => void;
+    onCategoryFilter: (category: string) => void;
   },
   focusTerm: string | null,
   isAdmin: boolean,
   freshId?: number,
+  activeCategory = "", // aktueller Themen-Tab oben ("all"/"" = kein Filter)
 ): void {
+  // Wechselt der Nutzer oben den Themen-Tab, übernimmt der Suchraum links
+  // denselben Filter (siehe Anforderung: "cybersec" antippen -> nur noch
+  // rote/cybersecurity-Tags sehen). Bleibt der Themen-Tab unverändert, darf
+  // eine bereits offene Admin-Auswahl im Dropdown unten weiter gelten -
+  // deshalb nur bei einer echten Änderung überschreiben, nicht bei jedem Re-Render.
+  const normalizedActive = activeCategory === "all" ? "" : activeCategory;
+  if (normalizedActive !== lastActiveCategory) {
+    tagCategoryFilter = normalizedActive;
+    lastActiveCategory = normalizedActive;
+  }
+
   const q = tagSearch.trim().toLowerCase();
   const visibleTerms = terms.filter(
     (t) =>
@@ -37,6 +51,13 @@ export function renderTerms(
 
   el.innerHTML = `
     <div class="term-controls-sticky">
+      <div class="cat-legend" title="Nach Kategorie filtern">
+        <button type="button" class="cat legend-item legend-all ${tagCategoryFilter ? "" : "active"}" data-v="all">alle</button>
+        ${CATEGORIES.map(
+          (c) =>
+            `<button type="button" class="cat ${c} legend-item ${tagCategoryFilter === c ? "active" : ""}" data-v="${c}">${CATEGORY_LABEL[c]}</button>`,
+        ).join("")}
+      </div>
       ${
         isAdmin
           ? `<form class="term-input" id="term-form" autocomplete="off">
@@ -89,6 +110,16 @@ export function renderTerms(
 
   if (input) restrictToAlnum(input);
   if (search) restrictToAlnum(search);
+
+  // Legende oben ist gleichzeitig Filter: Klick auf eine Kategorie zeigt
+  // (wie der Themen-Tab oben) nur noch deren Tags/Feed - erneuter Klick auf
+  // die bereits aktive Kategorie hebt den Filter wieder auf ("alle").
+  el.querySelectorAll<HTMLButtonElement>(".cat-legend .legend-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const v = btn.dataset.v!;
+      handlers.onCategoryFilter(normalizedActive === v ? "all" : v);
+    });
+  });
 
   // Kombiniert Text- und Kategorie-Filter live auf den schon gerenderten Chips -
   // ohne kompletten Re-Render, damit Tippen/Fokus nicht verloren gehen.

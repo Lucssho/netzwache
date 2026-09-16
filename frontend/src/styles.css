@@ -233,6 +233,16 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
 /* ===================== Schwebendes Fenster (macOS-Chrome) ===================== */
 #app {
   display: grid;
+  /* grid-template-columns fehlte: ohne sie bekommt die implizite einzelne
+     Spalte kein "minmax(0, ...)" und darf laut Grid-Spezifikation breiter
+     werden als #app selbst, sobald ein Kind (z.B. .filterbar mit seinen
+     Tabs/Suchfeld/Buttons) mehr Platz zum Umbrechen bräuchte, als der
+     Viewport hergibt - #app { overflow: hidden } schneidet das dann nur
+     unsichtbar ab, statt echtes Umbrechen/Schrumpfen zu erzwingen. Das war
+     die Ursache für "rechte Seite wird bei schmalem Fenster abgeschnitten"
+     auf Handy-Breiten, obwohl .main selbst schon korrekt auf eine Spalte
+     umschaltete. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto auto 1fr auto;
   max-width: 1900px;
   height: calc(100vh - 28px);
@@ -251,33 +261,44 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
   #app { height: 100vh; border-radius: 0; max-width: none; }
 }
 
-/* Ampel - Fensterschaltflächen wie bei macOS. Grün pulsiert live mit dem
-   Stream-Status statt reiner Deko. */
-.traffic { display: flex; align-items: center; gap: 8px; padding-right: 6px; }
-.traffic i {
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  display: block;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
-}
-.traffic i.tr-red { background: var(--red); }
-.traffic i.tr-amber { background: var(--amber); }
-.traffic i.tr-green { background: var(--dimmer); transition: background 0.2s; }
-.traffic i.tr-green.live { background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
-.traffic i.tr-green.live.pulse { animation: pulse 1.8s ease-in-out infinite; }
-
 /* ===================== Layout ===================== */
 .main {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 324px;
   gap: var(--gap-main);
   padding: var(--gap-main);
   overflow: hidden;
   transition: grid-template-columns 0.32s ease;
 }
-.main.left-collapsed { grid-template-columns: 44px minmax(0, 1fr) 324px; }
-.main.right-collapsed { grid-template-columns: 300px minmax(0, 1fr) 44px; }
-.main.left-collapsed.right-collapsed { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+
+/* Feste Spaltenbreiten für die auf-/zuklappbaren Seitenspalten gelten NUR
+   ab Tablet-Breite aufwärts. Diese Regeln sind spezifischer als das bloße
+   ".main" in den @media-Blöcken unten (zwei Klassen statt einer schlagen
+   per CSS-Spezifität IMMER, unabhängig von der Reihenfolge im Stylesheet
+   oder ob sie selbst in einem @media-Block stehen) - standen sie hier
+   ungeschützt, würden sie auf jedem schmalen Bildschirm (Handy) die
+   Ein-Spalten-Ansicht weiter unten aushebeln und stattdessen mit ihren
+   festen 300px/44px-Breiten antreten, wodurch der Feed in der Mitte auf
+   fast nichts zusammengequetscht wird ("nur noch 10% der Seite sichtbar").
+   Sichtbar wurde das erst, seit die linke Spalte standardmäßig offen ist -
+   vorher verdeckte ".left-collapsed.right-collapsed" (3 Klassen, noch mehr
+   Spezifität) denselben Fehler zufällig, weil dann beide Spalten ohnehin
+   auf schmale 44px zusammenschrumpften. */
+@media (min-width: 1181px) {
+  .main { grid-template-columns: 300px minmax(0, 1fr) 324px; }
+  .main.left-collapsed { grid-template-columns: 44px minmax(0, 1fr) 324px; }
+  .main.right-collapsed { grid-template-columns: 300px minmax(0, 1fr) 44px; }
+  .main.left-collapsed.right-collapsed { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+}
+/* Tablet: dieselben Zustände, nur mit den schmaleren Seitenspalten-Maßen -
+   eigener, disjunkter Breitenbereich statt eines späteren "@media
+   (max-width: 1180px)" mit bloßem ".main", denn das hätte exakt dasselbe
+   Spezifitätsproblem wie oben beschrieben erneut eingeführt. */
+@media (min-width: 861px) and (max-width: 1180px) {
+  .main { grid-template-columns: 240px minmax(0, 1fr) 260px; }
+  .main.left-collapsed { grid-template-columns: 44px minmax(0, 1fr) 260px; }
+  .main.right-collapsed { grid-template-columns: 240px minmax(0, 1fr) 44px; }
+  .main.left-collapsed.right-collapsed { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+}
 
 /* Während der Kollaps-Animation: backdrop-filter (Weichzeichner) auf den
    Spalten, deren Breite sich gerade ändert, abschalten. Ein Gaussian-Blur-
@@ -334,9 +355,6 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: var(--glow)
 .icon-btn.collapse-toggle svg { display: block; transition: transform 0.15s ease; }
 .icon-btn.collapse-toggle.flip svg { transform: scaleX(-1); }
 
-@media (max-width: 1180px) {
-  .main { grid-template-columns: 240px minmax(0, 1fr) 260px; }
-}
 @media (max-width: 860px) {
   .main { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   .col-left { max-height: 240px; }
@@ -525,54 +543,23 @@ header.top::after {
   opacity: 0.75;
 }
 
-#header-inner { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
+#header-inner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; flex: 1; min-width: 0; }
 
-.brand { display: flex; align-items: center; gap: 4px; }
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand svg { filter: drop-shadow(0 0 6px rgba(149, 29, 64, 0.35)); }
 .ifis-logo {
   height: 34px;
   width: auto;
   flex-shrink: 0;
 }
-.brand-text h1 {
+.brand-title {
   margin: 0;
-  font-size: 1.46rem;
-  letter-spacing: 0.22em;
-  word-spacing: -0.5em;
+  font-size: 1.3rem;
   font-weight: 700;
-  color: var(--fg-strong);
-  text-shadow: 0 0 14px rgba(149, 29, 64, 0.3);
-}
-.brand-text .sub {
-  font-size: 0.73rem;
-  letter-spacing: 0.17em;
-  color: var(--dim);
-  text-transform: uppercase;
-  margin-top: 2px;
-}
-
-.prompt {
-  font-size: 0.92rem;
-  color: var(--dim);
-  padding: 5px 11px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--terminal-bg);
+  color: var(--secondary); /* Blauton des "if" in if(is), siehe favicon.png */
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.prompt b { color: var(--accent-soft); font-weight: 500; }
-.prompt .cursor {
-  display: inline-block;
-  width: 7px;
-  height: 13px;
-  background: var(--accent-soft);
-  vertical-align: -2px;
-  animation: blink 1.1s steps(2, start) infinite;
-}
-@keyframes blink { 50% { opacity: 0; } }
-
+.brand-title .accent { color: var(--accent); }
 .head-stats { margin-left: auto; display: flex; align-items: center; gap: 18px; }
 .hstat { text-align: right; line-height: 1.25; }
 .hstat .k {
@@ -622,7 +609,13 @@ header.top::after {
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
-.tabs { display: flex; gap: 3px; background: var(--seg-bg); padding: 3px; border-radius: 999px; border: 1px solid var(--line-soft); }
+/* min-width:0 + overflow-x:auto: eine Tab-Leiste mit vielen Einträgen
+   (z.B. alle Plattform-Tabs) soll auf schmalen Bildschirmen intern seitlich
+   scrollen können, statt die ganze Filterleiste (und damit die Seite)
+   breiter zu ziehen als der Viewport - ohne min-width:0 verhindert die
+   Flexbox-Standardvorgabe "min-width:auto" genau dieses Schrumpfen. */
+.tabs { display: flex; gap: 3px; background: var(--seg-bg); padding: 3px; border-radius: 999px; border: 1px solid var(--line-soft); min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   display: inline-flex;
   align-items: center;
@@ -641,6 +634,31 @@ header.top::after {
   background: color-mix(in srgb, var(--secondary) 13%, transparent);
   color: var(--secondary);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--secondary) 35%, transparent);
+}
+
+/* Themen-Tabs: aktiver Tab bekommt dieselbe Farbe wie die Kategorie-Badges
+   auf den Beiträgen (.cat.cybersecurity etc.) und die Tag-Chips im
+   Suchraum (.chip.cybersecurity etc.) - ein Klick auf "cybersec" macht so
+   sofort sichtbar, welche Farbe gerade gefiltert wird. */
+#tab-category .tab.active[data-v="cybersecurity"] {
+  background: rgba(255, 92, 92, 0.14);
+  color: #ff8f8f;
+  box-shadow: inset 0 0 0 1px rgba(255, 92, 92, 0.4);
+}
+#tab-category .tab.active[data-v="it"] {
+  background: rgba(86, 182, 255, 0.14);
+  color: #8ccdff;
+  box-shadow: inset 0 0 0 1px rgba(86, 182, 255, 0.4);
+}
+#tab-category .tab.active[data-v="nachrichten"] {
+  background: rgba(255, 204, 51, 0.14);
+  color: var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(255, 204, 51, 0.4);
+}
+#tab-category .tab.active[data-v="alltag"] {
+  background: rgba(198, 120, 221, 0.14);
+  color: #d9a5e8;
+  box-shadow: inset 0 0 0 1px rgba(198, 120, 221, 0.4);
 }
 
 .tabs-more-anchor { position: relative; display: inline-flex; }
@@ -1011,6 +1029,28 @@ a.post-square:hover { text-decoration: none; }
 .cat.it { background: rgba(86, 182, 255, 0.14); color: #8ccdff; }
 .cat.nachrichten { background: rgba(255, 204, 51, 0.14); color: var(--gold); }
 .cat.alltag { background: rgba(198, 120, 221, 0.14); color: #d9a5e8; }
+
+/* Farb-Legende im Suchraum, direkt über dem Tag-Filter: erklärt die
+   Kategorie-Farben (dieselben wie auf den Beitrags-Badges/.cat und den
+   Tag-Chips/.chip) und filtert per Klick genau wie die Themen-Tabs oben. */
+.cat-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.cat-legend .legend-item {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+}
+.cat-legend .legend-item:hover { opacity: 1; }
+.cat-legend .legend-item.active { opacity: 1; }
+.cat-legend .legend-item.active.cybersecurity { border-color: rgba(255, 92, 92, 0.6); }
+.cat-legend .legend-item.active.it { border-color: rgba(86, 182, 255, 0.6); }
+.cat-legend .legend-item.active.nachrichten { border-color: rgba(255, 204, 51, 0.6); }
+.cat-legend .legend-item.active.alltag { border-color: rgba(198, 120, 221, 0.6); }
+/* "alle" hebt jeden Kategorie-Filter wieder auf - bewusst neutral (kein
+   Kategorie-Farbton), damit sie klar als Reset statt als 5. Kategorie liest. */
+.cat-legend .legend-all { background: var(--badge-bg); color: var(--dim); }
+.cat-legend .legend-all.active { color: var(--fg-strong); border-color: var(--line-soft); }
 
 .cve {
   font-size: 0.73rem;
