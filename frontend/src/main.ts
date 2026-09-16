@@ -321,8 +321,20 @@ function renderTabs(): void {
   );
   els.tabPlatform.querySelector<HTMLButtonElement>("#btn-more-platforms")!.addEventListener("click", (ev) => {
     ev.stopPropagation();
+    const btn = ev.currentTarget as HTMLElement;
     const panel = els.tabPlatform.querySelector<HTMLElement>("#more-platforms-panel")!;
-    panel.style.display = panel.style.display === "none" ? "flex" : "none";
+    const opening = panel.style.display === "none";
+    if (opening) {
+      // position:fixed statt CSS-only "top: calc(100% + 6px)" - .tabs scrollt
+      // seit dem Schmalbildschirm-Fix horizontal (overflow-x:auto), das
+      // Panel muss deshalb an die tatsächliche Bildschirmposition des
+      // Buttons angeheftet werden, sonst würde es vom selben Scroll-
+      // Container abgeschnitten (siehe Kommentar in styles.css).
+      const rect = btn.getBoundingClientRect();
+      panel.style.top = `${rect.bottom + 6}px`;
+      panel.style.left = `${rect.left}px`;
+    }
+    panel.style.display = opening ? "flex" : "none";
   });
   els.tabCategory.querySelectorAll<HTMLElement>(".tab").forEach((b) =>
     b.addEventListener("click", () => {

@@ -663,10 +663,14 @@ header.top::after {
 
 .tabs-more-anchor { position: relative; display: inline-flex; }
 .tab-more svg { transition: transform 0.15s ease; }
+/* position:fixed statt absolute, mit top/left per JS aus der Button-Position
+   berechnet (siehe main.ts) - seit .tabs wegen des schmalen Bildschirme-Fixes
+   horizontal scrollt (overflow-x:auto), würde ein "position:absolute"-Panel
+   relativ zum Scroll-Container hier vom selben Container abgeschnitten, weil
+   overflow-x:auto laut Spezifikation automatisch auch overflow-y auf "auto"
+   setzt - das Panel öffnete sich dann unsichtbar statt sichtbar darüber. */
 .tabs-more-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  position: fixed;
   z-index: 40;
   display: flex;
   flex-direction: column;
