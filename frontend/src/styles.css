@@ -1,8 +1,8 @@
 /* =====================================================================
-   CYBER SHIELD - macOS-Fensteroptik + Terminal-Farbwelt
+   Foren-News Analyse - macOS-Fensteroptik + Terminal-Farbwelt
    Akzent: Orange (vormals Terminal-Grün) + Amber/Bernstein + Schwarz-Rot-Gold
-   Schwebendes Fenster mit Ampel, Vibrancy-Blur, wählbare Schriftart
-   und Schriftgröße (siehe html[data-font] / --ui-font-size weiter unten).
+   Schwebendes Fenster mit Vibrancy-Blur, wählbare Schriftart und
+   Schriftgröße (siehe html[data-font] / --ui-font-size weiter unten).
    ===================================================================== */
 
 :root {
@@ -764,24 +764,6 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
 .pbadge.facebook { color: var(--p-facebook); }
 .pbadge.news { color: var(--p-news); }
 .pbadge.googlenews { color: var(--p-googlenews); }
-
-/* reine Symbol-Variante ohne Text (z.B. sehr enge Stellen) */
-.picon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px; height: 20px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-  background: var(--badge-bg);
-  flex: none;
-}
-.picon.bluesky { color: var(--p-bluesky); }
-.picon.reddit { color: var(--p-reddit); }
-.picon.x { color: var(--p-x); }
-.picon.facebook { color: var(--p-facebook); }
-.picon.news { color: var(--p-news); }
-.picon.googlenews { color: var(--p-googlenews); }
 
 /* ===================== Suchbegriffe ===================== */
 /* Bleibt oben im scrollbaren Panel angeheftet, statt mit der wachsenden
