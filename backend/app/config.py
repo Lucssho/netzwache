@@ -43,14 +43,14 @@ class Settings(BaseSettings):
     http_timeout: int = 20
     user_agent: str = "netzwache/1.0 (open-source OSINT dashboard; +https://localhost)"
     max_items_per_run: int = 50
-    retention_days: int = 30        # Posts älter als X Tage werden aufgeräumt
-    cleanup_interval_seconds: int = 24 * 60 * 60  # wie oft die Retention-Räumung automatisch läuft
-    max_posts: int = 10000          # Zeilen-Obergrenze - nur für SQLite (Dev/Tests)
-    # Größen-Obergrenze für posts (Postgres) und wie viel pro Räumung gelöscht
-    # wird - beides nur der Default-Wert beim allerersten Start. Danach lebt
-    # der tatsächliche Wert in ui_settings und ist per Admin-Oberfläche
-    # (PUT /api/settings) live änderbar, ohne Neustart (siehe scheduler.py::
-    # _effective_size_limits). 0 = Größenlimit deaktiviert.
+    # Einzige automatische Löschregel für posts: Größenobergrenze (nur
+    # Postgres/Produktion - siehe scheduler.py::_enforce_size_cap). Kein
+    # zeitbasiertes Aufräumen (früher RETENTION_DAYS) und keine Zeilen-
+    # Obergrenze mehr - ein Post verschwindet nur noch, wenn dieses
+    # Größenlimit erreicht ist, sonst nie. Nur der Default-Wert beim
+    # allerersten Start - danach lebt der tatsächliche Wert in ui_settings
+    # und ist per Admin-Oberfläche (PUT /api/settings) live änderbar, ohne
+    # Neustart (siehe scheduler.py::_effective_size_limits). 0 = deaktiviert.
     max_posts_size_gb: float = 15.0
     posts_trim_chunk_mb: float = 100.0
 

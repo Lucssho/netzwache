@@ -13,7 +13,6 @@ WRITE_CALLS = [
     ("delete", "/api/terms/1", None),
     ("patch", "/api/sources/news", {"enabled": False}),
     ("post", "/api/collect", None),
-    ("post", "/api/maintenance/cleanup", None),
     ("put", "/api/settings", {"values": {"theme": "light"}}),
 ]
 

@@ -412,12 +412,6 @@ async def event_log(
     return [r.to_dict() for r in rows]
 
 
-@router.post("/maintenance/cleanup", dependencies=[Depends(require_admin)])
-async def cleanup() -> dict:
-    removed = await engine.cleanup()
-    return {"removed": removed, "retention_days": settings.retention_days}
-
-
 @router.post("/maintenance/delete-all-posts", dependencies=[Depends(require_admin)])
 async def delete_all_posts(
     body: DeleteAllPostsConfirm, session: AsyncSession = Depends(get_session)

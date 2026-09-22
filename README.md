@@ -338,8 +338,9 @@ Migrationsschritt nötig, das läuft auch auf der schon existierenden `posts`-Ta
 
 ## Speicherbegrenzung
 
-Drei automatische, voneinander unabhängige Räumungen laufen im Scheduler mit, keine davon
-braucht einen manuellen Aufruf:
+Genau EINE automatische Löschregel läuft im Scheduler mit, kein zeitbasiertes Aufräumen und keine
+Zeilen-Obergrenze mehr - ein Post verschwindet nur noch, wenn die Datenbank zu groß wird, sonst
+nie:
 
 * **`MAX_POSTS_SIZE_GB`** (Standard 15, nur **Postgres/Produktion**): harte Größenobergrenze für
   die `posts`-Tabelle inkl. ihrer eigenen Indizes (`pg_total_relation_size`). Nach jedem
@@ -352,15 +353,14 @@ braucht einen manuellen Aufruf:
   (kein automatisches `VACUUM FULL`, das die Tabelle exklusiv sperren würde) - er wird nur für
   künftige Einträge wiederverwendet. Die Datenbankdatei wächst dadurch bis zum Limit und bleibt
   danach etwa auf der einmal erreichten Größe stehen, auch wenn man das Limit später senkt.
-* **`MAX_POSTS`** (Standard 10000, nur **SQLite/Dev-Tests**): einfache Zeilen-Obergrenze, weil
-  SQLite kein `pg_total_relation_size` kennt und die Datenmengen dort ohnehin klein bleiben.
-* **`RETENTION_DAYS`** (Standard 30) + **`CLEANUP_INTERVAL_SECONDS`** (Standard 86400 = 24h):
-  zeitbasierte Räumung, unabhängig von den beiden oben - alle X Sekunden werden Posts gelöscht,
-  die älter als `RETENTION_DAYS` sind (nach `collected_at`), zusammen mit Log-Einträgen älter als
-  3 Tage. Läuft erstmals sofort beim Start des Backends, danach im konfigurierten Takt.
+  0 = Größenlimit deaktiviert, dann wird nie irgendetwas automatisch gelöscht.
 
-`POST /api/maintenance/cleanup` (Admin) stößt dieselbe zeitbasierte Räumung zusätzlich manuell an,
-z.B. um nicht auf den nächsten automatischen Lauf zu warten.
+Unter **SQLite** (Dev/Tests) greift keine automatische Löschregel (kein `pg_total_relation_size`
+dort) - für die kleinen Testdatenmengen ohne Bedeutung.
+
+(Frühere Versionen hatten zusätzlich eine zeitbasierte `RETENTION_DAYS`-Räumung und eine
+SQLite-Zeilen-Obergrenze `MAX_POSTS` - beide entfernt, damit Daten ausschließlich aus
+Platzgründen gelöscht werden, nie aus Altersgründen.)
 
 ---
 

@@ -75,6 +75,24 @@ async def admin_client(app_client):
 
 
 @pytest_asyncio.fixture
+async def clean_posts_table(app_client):
+    """Leert die posts-Tabelle vor dem Test - für Tests, die sich auf einen
+    bestimmten Tabellenzustand verlassen (z.B. "der älteste Post wird zuerst
+    gelöscht"), unabhängig davon, was andere Tests im selben Lauf schon
+    eingefügt haben. Läuft ausschließlich gegen die Test-DB (SQLite-Datei
+    bzw. der per DATABASE_URL für die Testsuite gesetzte throwaway-Postgres),
+    nie gegen eine echte/produktive Datenbank."""
+    from sqlalchemy import delete
+
+    from app.db import SessionLocal
+    from app.models import Post
+
+    async with SessionLocal() as s:
+        await s.execute(delete(Post))
+        await s.commit()
+
+
+@pytest_asyncio.fixture
 async def seed_posts():
     from app.collectors.base import RawItem
     from app.scheduler import engine

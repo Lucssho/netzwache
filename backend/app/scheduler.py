@@ -12,10 +12,10 @@ import math
 import multiprocessing
 import time
 from concurrent.futures import ProcessPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from .collectors import COLLECTOR_CLASSES, BaseCollector, CollectorError, RawItem
@@ -79,7 +79,6 @@ class Engine:
         self.started_at = datetime.now(timezone.utc)
         self.tick_count = 0
         self.collected_session = 0
-        self._last_cleanup: float | None = None
         self._category_ids: dict[str, int] = {}
 
     # ------------------------------------------------------------------
@@ -168,7 +167,6 @@ class Engine:
         async with self._lock:
             self.tick_count += 1
             now = time.monotonic()
-            await self._maybe_cleanup(now)
             terms_rows = await self._active_terms()
             all_terms = [t.term for t in terms_rows]
 
@@ -206,21 +204,6 @@ class Engine:
             )
             return {"ran": due, "new": total_new}
 
-    async def _maybe_cleanup(self, now: float) -> None:
-        """Retention-Räumung (settings.retention_days) automatisch im Takt von
-        settings.cleanup_interval_seconds - lief vorher nur, wenn jemand
-        manuell POST /api/maintenance/cleanup aufgerufen hat. Läuft beim
-        allerersten Tick sofort (self._last_cleanup ist noch None), danach im
-        konfigurierten Intervall."""
-        if self._last_cleanup is not None and (now - self._last_cleanup) < settings.cleanup_interval_seconds:
-            return
-        self._last_cleanup = now
-        removed = await self.cleanup()
-        if removed:
-            await self._log(
-                "info", "core", f"{removed} Beiträge älter als {settings.retention_days} Tage entfernt"
-            )
-
     # ------------------------------------------------------------------
     async def _run_collector(self, name: str, terms: list[str]) -> int:
         col = self.collectors[name]
@@ -249,35 +232,13 @@ class Engine:
         return len(stored)
 
     async def _enforce_storage_limits(self) -> None:
-        """Postgres (Produktion): Größenlimit (settings.max_posts_size_gb) -
-        SQLite (Dev/Tests) kennt kein pg_total_relation_size und bleibt beim
-        einfacheren Zeilen-Limit (settings.max_posts), das für die dortigen
-        Datenmengen ohnehin ausreicht."""
-        if db_engine.dialect.name == "sqlite":
-            await self._enforce_post_cap()
-        else:
+        """Einzige automatische Löschregel für posts: Größenlimit
+        (settings.max_posts_size_gb, siehe _enforce_size_cap) - Postgres-
+        spezifisch (pg_total_relation_size). Unter SQLite (Dev/Tests) ein
+        No-op: es gibt dort keine Entsprechung, und die Testdatenbank wird
+        ohnehin nach jeder Session verworfen (siehe conftest.py)."""
+        if db_engine.dialect.name != "sqlite":
             await self._enforce_size_cap()
-
-    async def _enforce_post_cap(self) -> None:
-        """Harte Obergrenze (settings.max_posts): wird sie überschritten,
-        fallen die ältesten Posts (nach collected_at) zuerst raus - unabhängig
-        von retention_days, das nur zeitbasiert aufräumt und ohnehin nicht
-        automatisch läuft."""
-        if not settings.max_posts:
-            return
-        async with SessionLocal() as s:
-            total = (await s.execute(select(func.count(Post.id)))).scalar_one()
-            overflow = total - settings.max_posts
-            if overflow <= 0:
-                return
-            oldest_ids = select(Post.id).order_by(Post.collected_at.asc()).limit(overflow)
-            res = await s.execute(delete(Post).where(Post.id.in_(oldest_ids)))
-            await s.commit()
-            removed = res.rowcount or 0
-        if removed:
-            await self._log(
-                "info", "core", f"{removed} älteste Beiträge entfernt (Limit {settings.max_posts})"
-            )
 
     async def _effective_size_limits(self, s) -> tuple[float, float]:
         """Liest max_posts_size_gb/posts_trim_chunk_mb aus ui_settings (per
@@ -536,19 +497,6 @@ class Engine:
         await hub.broadcast("log", payload)
 
     # ------------------------------------------------------------------
-    async def cleanup(self) -> int:
-        """Löscht alte Posts und Logeinträge (Retention)."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.retention_days)
-        async with SessionLocal() as s:
-            res = await s.execute(delete(Post).where(Post.collected_at < cutoff))
-            await s.execute(
-                delete(EventLog).where(
-                    EventLog.ts < datetime.now(timezone.utc) - timedelta(days=3)
-                )
-            )
-            await s.commit()
-            return res.rowcount or 0
-
     @property
     def uptime_seconds(self) -> float:
         return (datetime.now(timezone.utc) - self.started_at).total_seconds()

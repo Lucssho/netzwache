@@ -1,7 +1,8 @@
-"""Sicherstellen, dass ein kollidierender Datensatz den restlichen Lauf nicht killt."""
+"""Speichern: Kollisionen dürfen den Lauf nicht killen, und die einzige
+automatische Löschregel für posts ist die Größenobergrenze (Postgres) -
+kein Alter, keine Zeilenzahl. Siehe scheduler.py::_enforce_storage_limits."""
 import os
-import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -38,49 +39,35 @@ async def test_collision_does_not_drop_other_items(app_client, monkeypatch):
     assert res["items"], "Kubernetes-Post muss über die API auffindbar sein"
 
 
+@pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL", "").startswith("sqlite"),
+    reason="testet die SQLite-Dialekt-Weiche in _enforce_storage_limits() speziell",
+)
 @pytest.mark.asyncio
-async def test_post_cap_removes_oldest_first(app_client, monkeypatch):
-    """settings.max_posts ist die Zeilen-Obergrenze für SQLite (Dev/Tests) -
-    wird sie überschritten, müssen die ältesten Posts (nach collected_at)
-    zuerst raus, die neuesten aber erhalten bleiben. Über
-    _enforce_storage_limits() aufgerufen (nicht _enforce_post_cap() direkt),
-    damit auch die Dialekt-Weiche selbst mitgetestet wird - die Tests laufen
-    auf SQLite, landen also hier."""
-    from app.config import settings
-    from app.scheduler import engine
-
-    monkeypatch.setattr(settings, "max_posts", 2)
-
-    now = datetime.now(timezone.utc)
-    items = [
-        RawItem(platform="bluesky", external_id="cap-old", text="Ältester Beitrag über Kubernetes", created_at=now),
-        RawItem(platform="bluesky", external_id="cap-mid", text="Mittlerer Beitrag über Kubernetes", created_at=now),
-        RawItem(platform="bluesky", external_id="cap-new", text="Neuester Beitrag über Kubernetes", created_at=now),
-    ]
-    for it in items:
-        stored = await engine._store([it], ["kubernetes"])
-        assert stored, f"{it.external_id} musste gespeichert werden"
-        await engine._enforce_storage_limits()
-
-    res = (await app_client.get("/api/posts?limit=50&q=kubernetes")).json()
-    remaining = {p["external_id"] for p in res["items"]}
-    assert len(remaining) == 2, "Obergrenze muss eingehalten werden"
-    assert remaining == {"cap-mid", "cap-new"}, "die ältesten Posts müssen zuerst entfernt werden"
-
-
-@pytest.mark.asyncio
-async def test_storage_limits_use_post_cap_on_sqlite(app_client):
-    """_enforce_storage_limits() muss auf SQLite (der Dialekt, auf dem die
-    Testsuite läuft) auf die Zeilen-Obergrenze ausweichen, nicht auf die
-    Postgres-spezifische Größenprüfung (die pg_total_relation_size nutzt,
-    was es unter SQLite gar nicht gibt)."""
+async def test_storage_limits_are_a_noop_on_sqlite(app_client):
+    """Unter SQLite (Testsuite) gibt es keine automatische Löschregel mehr -
+    weder nach Alter noch nach Zeilenzahl (beide wurden entfernt). Ein sehr
+    alter Post muss unangetastet bleiben, auch nach _enforce_storage_limits()."""
     from app.db import engine as db_engine
     from app.scheduler import engine
 
     assert db_engine.dialect.name == "sqlite", "Testsuite läuft laut conftest.py auf SQLite"
-    # Darf nicht crashen (pg_total_relation_size existiert unter SQLite nicht) -
-    # wäre _enforce_size_cap() fälschlich aufgerufen worden, würde das hier auffliegen.
+
+    ancient = RawItem(
+        platform="reddit",
+        external_id="noop-ancient",
+        text="Uralter Beitrag über Kubernetes",
+        created_at=datetime.now(timezone.utc) - timedelta(days=3650),
+    )
+    stored = await engine._store([ancient], ["kubernetes"])
+    assert stored, "Testdaten müssen zuerst gespeichert werden"
+
     await engine._enforce_storage_limits()
+
+    res = (await app_client.get("/api/posts?limit=50&q=kubernetes")).json()
+    assert "noop-ancient" in {p["external_id"] for p in res["items"]}, (
+        "kein Alter/keine Zeilenzahl darf einen Post automatisch entfernen"
+    )
 
 
 @pytest.mark.skipif(
@@ -88,11 +75,17 @@ async def test_storage_limits_use_post_cap_on_sqlite(app_client):
     reason="pg_total_relation_size gibt es nur unter Postgres",
 )
 @pytest.mark.asyncio
-async def test_enforce_size_cap_removes_oldest_chunk_on_postgres(app_client, monkeypatch):
+async def test_enforce_size_cap_removes_oldest_chunk_on_postgres(app_client, monkeypatch, clean_posts_table):
     """Nur relevant, wenn die Tests direkt gegen Postgres laufen (DATABASE_URL
     entsprechend gesetzt) - die Standard-Testsuite läuft auf SQLite und
     überspringt das hier. Live gegen die echte Postgres-Instanz manuell
-    verifiziert (siehe Sitzungsprotokoll)."""
+    verifiziert (siehe Sitzungsprotokoll).
+
+    clean_posts_table: _enforce_size_cap() löscht global die ältesten Posts
+    der ganzen Tabelle, nicht nur die dieses Tests - ohne eine leere
+    Ausgangslage würden liegengebliebene (ältere) Posts anderer Tests im
+    selben Testlauf zuerst gelöscht statt "size-cap-0", und der Test würde
+    fälschlich fehlschlagen."""
     from app.config import settings
     from app.scheduler import engine
 
@@ -124,53 +117,31 @@ async def test_enforce_size_cap_removes_oldest_chunk_on_postgres(app_client, mon
     assert newest in remaining_ids, "der neueste Post muss erhalten bleiben"
 
 
+@pytest.mark.skipif(
+    os.environ.get("DATABASE_URL", "").startswith("sqlite"),
+    reason="_enforce_size_cap ist Postgres-spezifisch",
+)
 @pytest.mark.asyncio
-async def test_retention_cleanup_runs_automatically_on_first_tick(app_client, monkeypatch):
-    """_maybe_cleanup lief früher nur über den manuellen Admin-Endpunkt. Jetzt
-    muss sie beim allerersten Tick sofort laufen (self._last_cleanup ist noch
-    None) und retention_days respektieren."""
+async def test_size_cap_ignores_age_and_row_count_below_the_limit(app_client, monkeypatch, clean_posts_table):
+    """Solange die Tabelle unter dem Größenlimit bleibt, darf NICHTS gelöscht
+    werden - auch ein sehr alter Post oder eine hohe Zeilenzahl allein sind
+    kein Löschgrund mehr (frühere RETENTION_DAYS/MAX_POSTS-Regeln entfernt)."""
     from app.config import settings
     from app.scheduler import engine
 
-    monkeypatch.setattr(settings, "retention_days", 0)
-    engine._last_cleanup = None  # Zustand "noch nie gelaufen" unabhängig von anderen Tests erzwingen
+    ancient = RawItem(
+        platform="reddit",
+        external_id="pg-noop-ancient",
+        text="Uralter Beitrag über Kubernetes",
+        created_at=datetime.now(timezone.utc) - timedelta(days=3650),
+    )
+    stored = await engine._store([ancient], ["kubernetes"])
+    assert stored
 
-    now = datetime.now(timezone.utc)
-    item = RawItem(platform="reddit", external_id="cleanup-old", text="Alter Beitrag über Phishing", created_at=now)
-    stored = await engine._store([item], ["phishing"])
-    assert stored, "Testdaten müssen zuerst gespeichert werden"
+    monkeypatch.setattr(settings, "max_posts_size_gb", 1000.0)  # weit über der Tabellengröße
+    await engine._enforce_size_cap()
 
-    await engine._maybe_cleanup(time.monotonic())
-
-    res = (await app_client.get("/api/posts?limit=50&q=phishing")).json()
-    ids = {p["external_id"] for p in res["items"]}
-    assert "cleanup-old" not in ids, "retention_days=0 muss den Post beim ersten automatischen Lauf entfernen"
-
-
-@pytest.mark.asyncio
-async def test_retention_cleanup_respects_interval(app_client, monkeypatch):
-    """Innerhalb von cleanup_interval_seconds darf kein zweiter Durchlauf
-    passieren - sonst würde jeder Tick die DB abfragen, obwohl retention_days
-    sich nicht geändert hat."""
-    from app.config import settings
-    from app.scheduler import engine
-
-    monkeypatch.setattr(settings, "retention_days", 0)
-    monkeypatch.setattr(settings, "cleanup_interval_seconds", 999_999)
-
-    now = datetime.now(timezone.utc)
-    first = RawItem(platform="reddit", external_id="cleanup-first", text="Erster Beitrag über Malware", created_at=now)
-    await engine._store([first], ["malware"])
-
-    t0 = time.monotonic()
-    engine._last_cleanup = None
-    await engine._maybe_cleanup(t0)  # läuft (erster Aufruf) und entfernt cleanup-first
-
-    second = RawItem(platform="reddit", external_id="cleanup-second", text="Zweiter Beitrag über Malware", created_at=now)
-    await engine._store([second], ["malware"])
-    await engine._maybe_cleanup(t0 + 1)  # weit innerhalb des Intervalls -> darf nichts löschen
-
-    res = (await app_client.get("/api/posts?limit=50&q=malware")).json()
-    ids = {p["external_id"] for p in res["items"]}
-    assert "cleanup-first" not in ids, "der erste Durchlauf muss den alten Post entfernt haben"
-    assert "cleanup-second" in ids, "innerhalb des Intervalls darf kein zweiter Durchlauf passieren"
+    res = (await app_client.get("/api/posts?limit=50&q=kubernetes")).json()
+    assert "pg-noop-ancient" in {p["external_id"] for p in res["items"]}, (
+        "unterhalb des Größenlimits darf Alter allein kein Löschgrund sein"
+    )

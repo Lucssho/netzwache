@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from .api import router
 from .config import settings
 from .db import SessionLocal, init_db
+from .db import engine as db_engine
 from .dedup import dedup
 from .hub import hub
 from .models import EventLog, Post, SourceState
@@ -49,6 +50,14 @@ async def lifespan(app: FastAPI):
     finally:
         await engine.stop()
         await dedup.close()
+        # Verbindungs-Pool sauber schließen, statt ihn offen zu lassen: sonst
+        # bleiben Verbindungen an die Event-Loop dieses Prozesslaufs gebunden.
+        # Wird der Lifespan innerhalb desselben Prozesses erneut durchlaufen
+        # (z.B. die Testsuite, die ihn pro Test einmal auf- und abbaut) und
+        # läuft dabei in einer NEUEN Event-Loop, wirft der alte Pool sonst
+        # "Future attached to a different loop" / "Event loop is closed",
+        # sobald er versucht, seine alten Verbindungen aufzuräumen.
+        await db_engine.dispose()
         log.info("NETZWACHE beendet")
 
 
