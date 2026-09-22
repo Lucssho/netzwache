@@ -12,7 +12,7 @@ from ..collectors import COLLECTOR_CLASSES
 from ..config import settings
 from ..db import engine as db_engine, get_session
 from ..dedup import dedup
-from ..db_json import json_array_top_counts, text_search_clause
+from ..db_json import json_array_top_counts, term_match_clause, text_search_clause
 from ..enrich import CATEGORIES
 from ..hub import hub
 from ..models import Category, EventLog, Post, PostCategory, PostCve, PostTag, SearchTerm, SourceState, UiSetting
@@ -109,6 +109,7 @@ async def list_posts(
     source: str | None = None,
     category: str | None = None,
     tag: str | None = None,
+    term: str | None = Query(None, max_length=120),
     cve: str | None = None,
     q: str | None = None,
     min_severity: int = Query(0, ge=0, le=100),
@@ -132,7 +133,16 @@ async def list_posts(
             )
         if tag:
             # z.B. "linux" - der Suchbegriff, den der Post getroffen hat.
-            s = s.join(PostTag, PostTag.post_id == Post.id).where(PostTag.tag == tag)
+            # Groß-/Kleinschreibung egal: Begriffe werden so gespeichert, wie
+            # sie angelegt wurden ("BSI", "CVE"), ?tag=bsi lieferte sonst 0.
+            s = s.join(PostTag, PostTag.post_id == Post.id).where(
+                func.lower(PostTag.tag) == tag.lower()
+            )
+        if term:
+            # Live-Treffer eines Suchbegriffs nach der gemeinsamen Definition
+            # (enrich.py) - unabhängig davon, ob/womit der Beitrag beim
+            # Sammeln getaggt wurde. Grundlage des Fokus-Modus.
+            s = s.where(term_match_clause(db_engine.dialect, term))
         if cve:
             s = s.join(PostCve, PostCve.post_id == Post.id).where(PostCve.cve == cve.upper())
         if q:

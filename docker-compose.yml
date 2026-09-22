@@ -19,7 +19,15 @@ services:
   redis:
     image: redis:7-alpine
     container_name: netzwache-redis
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    # Persistenz (AOF, jede Sekunde) statt "--save '' --appendonly no": hier
+    # liegt das Dedup-Gedächtnis (bereits gesehene Beiträge + Text-
+    # Fingerabdrücke gegen Cross-Posts). Ohne Persistenz war es bei jedem
+    # Neustart/Herunterfahren komplett weg - danach wurden alle Beiträge, die
+    # in den Feeds noch stehen, erneut als "neu" versucht (tausende Duplikat-
+    # Fehler im Postgres-Log) und Cross-Posts doppelt gespeichert.
+    command: ["redis-server", "--save", "", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redisdata:/data
     ports:
       - "6380:6379"
     healthcheck:
@@ -76,3 +84,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

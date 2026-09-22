@@ -168,7 +168,7 @@ sobald die passende Variable in der `.env` steht. Bis dahin melden sie sauber
 |---------|------|-------|
 | `GET` | `/api/health` | Laufzeit, Ticks, Dedup-Backend, WS-Clients |
 | `GET` | `/api/meta` | registrierte Collector + Einrichtungshinweise |
-| `GET` | `/api/posts` | Beiträge; Filter: `platform`, `source`, `category`, `tag`, `cve`, `q`, `min_severity`, `since_minutes` |
+| `GET` | `/api/posts` | Beiträge; Filter: `platform`, `source`, `category`, `tag` (Groß-/Kleinschreibung egal), `term` (Live-Treffer eines Suchbegriffs, siehe unten), `cve`, `q`, `min_severity`, `since_minutes` |
 | `GET` | `/api/stats` | Kennzahlen, Zeitreihe, Top-Keywords, CVE-Watch |
 | `GET` | `/api/sources` | Status aller Quellen |
 | `PATCH` | `/api/sources/{name}` | Quelle an/aus, Intervall ändern |
@@ -294,6 +294,20 @@ einen echten `JOIN`, nicht über eine JSON-Array-Suche - lassen sich beliebig mi
 `platform`/`source` kombinieren, z.B. `?platform=reddit&tag=linux`. `/api/stats.by_category`
 und `top_cves` sind entsprechend ein einfaches `GROUP BY` über die jeweilige Tabelle.
 `keywords` bleibt bewusst nur JSON (offenes Vokabular, siehe `db_json.py`).
+
+**Wann trifft ein Suchbegriff einen Beitrag?** Eine Definition für alles - Tagging beim Sammeln
+(`enrich.match_terms`), `GET /api/posts?term=...` und der Fokus-Modus im Frontend
+(`termMatch.ts`) wenden dieselbe Regel an: Der Begriff muss an einem **Wortanfang** stehen
+(`BSI` trifft `BSI-Warnung`, nicht `Website`), danach sind deutsche Endungen/Zusammensetzungen
+erlaubt (`Sicherheitslücke` trifft `Sicherheitslücken`, `Strompreis` trifft `Strompreisbremse`;
+Begriffe mit höchstens 4 Zeichen wie `BSI`/`CVE` erlauben nur ein Plural-`s`). Leerzeichen und
+Bindestrich im Begriff sind austauschbar (`zero-day` = `Zero Day`), Groß-/Kleinschreibung egal.
+Geprüft wird über Titel, Text, Autor und Quelle (ein Beitrag aus `r/linux` zählt für `linux`).
+`?term=` rechnet live über die Textfelder und ist damit unabhängig davon, ob/wie ein älterer
+Beitrag getaggt wurde; es scannt die Tabelle (Größenordnung 0,2 s pro Seite bei ~8.000
+Beiträgen). Ältere Posts tragen noch `post_tags` nach der früheren Teilstring-Regel, bis sie
+neu getaggt werden. `?q=` bleibt die Stammform-Volltextsuche (deutsche Stemming-Regeln,
+mehrere Wörter = UND) und liefert bewusst andere Treffer als `?term=`.
 
 Bestehende Posts (vor dieser Umstellung gesammelt) einmalig nachtragen:
 

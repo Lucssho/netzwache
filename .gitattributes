@@ -1,0 +1,4 @@
+# Shell-Skripte werden in Linux-Container gemountet (z.B. backup/backup.sh) -
+# mit CRLF-Zeilenenden (Windows, core.autocrlf=true) bricht "#!/bin/sh\r" dort
+# mit "not found" ab. Deshalb immer LF, egal auf welchem System ausgecheckt wird.
+*.sh text eol=lf

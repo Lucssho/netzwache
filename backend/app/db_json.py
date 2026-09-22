@@ -22,12 +22,34 @@ dialektfrei bleiben.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, or_, text
+from sqlalchemy import false, func, or_, text
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ClauseElement
 
+from .enrich import pg_term_pattern
 from .models import Post
+
+
+_TERM_HAYSTACK = (
+    "(coalesce(posts.title,'') || ' ' || coalesce(posts.text,'') || ' ' || "
+    "coalesce(posts.author,'') || ' ' || coalesce(posts.source,''))"
+)
+
+
+def term_match_clause(dialect: Dialect, term: str) -> ClauseElement:
+    """WHERE-Ausdruck für ?term= : trifft, wenn der Suchbegriff nach der
+    gemeinsamen Trefferdefinition (siehe enrich.py: Wortanfang, deutsche
+    Endungen, Titel+Text+Autor+Quelle) im Beitrag vorkommt. Bewusst KEINE
+    Stammform-Volltextsuche wie ?q= - die lieferte für dieselben Daten andere
+    Zahlen als Tagging und Fokus-Modus (z.B. "eu kommission" 118 statt 2
+    Treffern, "selfhosted" 11 statt 136)."""
+    if dialect.name == "sqlite":
+        return text(f"nw_term_match({_TERM_HAYSTACK}, :term) = 1").bindparams(term=term)
+    pattern = pg_term_pattern(term)
+    if pattern is None:
+        return false()
+    return text(f"{_TERM_HAYSTACK} ~* :pat").bindparams(pat=pattern)
 
 
 def text_search_clause(dialect: Dialect, q: str) -> ClauseElement:

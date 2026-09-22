@@ -149,12 +149,81 @@ def extract_keywords(text: str, limit: int = 8) -> list[str]:
     return [w for w, _ in counts.most_common(limit)]
 
 
+# --------------------------------------------------------------------------
+# Wann "trifft" ein Suchbegriff einen Beitrag?  EINE Definition für alles:
+# Tagging beim Sammeln (match_terms), API-Filter ?term= (db_json.term_match_clause,
+# Postgres-Variante unten) und Fokus-Modus im Frontend (containsTerm in
+# frontend/src/termMatch.ts) - vorher drei verschiedene Regeln (Teilstring /
+# Stammform-Volltextsuche / Ganzwort), die für dieselben Daten verschiedene
+# Zahlen lieferten.
+#
+#  - Der Begriff muss an einer Wortgrenze BEGINNEN: "BSI" trifft "BSI-Warnung",
+#    aber nicht "we-bsi-te" oder "Ab-si-cherung".
+#  - Danach sind deutsche Endungen/Zusammensetzungen erlaubt: "Sicherheitslücke"
+#    trifft "Sicherheitslücken", "Strompreis" trifft "Strompreisbremse",
+#    "Cyberangriff" trifft "Cyberangriffe". Sehr kurze Begriffe (<= 4 Buchstaben,
+#    z.B. BSI, CVE) erlauben nur ein optionales Plural-s ("CVEs") und müssen
+#    danach an einer Wortgrenze enden - sonst würden sie in unzähligen
+#    Wörtern anschlagen.
+#  - Leerzeichen und Bindestrich im Begriff sind austauschbar/optional:
+#    "zero-day" trifft "Zero Day" und "Zeroday"; "open source" trifft "open-source".
+#  - Groß-/Kleinschreibung egal.
+#  - Geprüft wird über Titel + Text + Autor + Quelle (dieselben Felder wie die
+#    Volltextsuche), damit z.B. ein Beitrag aus r/linux zu "linux" zählt.
+# --------------------------------------------------------------------------
+SHORT_TERM_MAX_LETTERS = 4
+_SEPARATORS = re.compile(r"[\s\-]+")
+_term_regex_cache: dict[str, re.Pattern[str]] = {}
+_PG_SPECIAL = re.compile(r"([.^$*+?()\[\]{}|\\])")
+
+
+def _term_parts(term: str) -> list[str]:
+    return [p for p in _SEPARATORS.split(term.strip()) if p]
+
+
+def _is_short_term(parts: list[str]) -> bool:
+    return sum(len(p) for p in parts) <= SHORT_TERM_MAX_LETTERS
+
+
+def term_regex(term: str) -> re.Pattern[str]:
+    """Kompiliertes Muster für die oben beschriebene Trefferdefinition (gecacht)."""
+    rx = _term_regex_cache.get(term)
+    if rx is None:
+        parts = _term_parts(term)
+        if not parts:
+            rx = re.compile(r"(?!)")  # leerer Begriff trifft nie
+        else:
+            body = r"[\s\-]*".join(re.escape(p) for p in parts)
+            tail = r"s?(?!\w)" if _is_short_term(parts) else ""
+            rx = re.compile(rf"(?<!\w){body}{tail}", re.IGNORECASE)
+        _term_regex_cache[term] = rx
+    return rx
+
+
+def pg_term_pattern(term: str) -> str | None:
+    """Dieselbe Definition als Postgres-Regex (für `~*`), oder None bei leerem Begriff."""
+    parts = _term_parts(term)
+    if not parts:
+        return None
+    body = r"[\s\-]*".join(_PG_SPECIAL.sub(r"\\\1", p) for p in parts)
+    tail = r"s?(?![[:alnum:]_])" if _is_short_term(parts) else ""
+    return rf"(?<![[:alnum:]_]){body}{tail}"
+
+
 def match_terms(text: str, terms: list[str]) -> list[str]:
-    low = normalize(text).lower()
-    return [t for t in terms if t.lower() in low]
+    haystack = normalize(text)
+    return [t for t in terms if term_regex(t).search(haystack)]
 
 
-def enrich(text: str, title: str = "", hint: str = "", terms: list[str] | None = None) -> dict:
+def enrich(
+    text: str,
+    title: str = "",
+    hint: str = "",
+    terms: list[str] | None = None,
+    extra: str = "",
+) -> dict:
+    """`extra` (Autor/Quelle) fließt NUR in matched_terms ein - Kategorien,
+    CVEs, Severity und Keywords bleiben allein aus Titel + Text abgeleitet."""
     full = f"{title} {text}".strip()
     cves = extract_cves(full)
     return {
@@ -162,5 +231,5 @@ def enrich(text: str, title: str = "", hint: str = "", terms: list[str] | None =
         "cve_ids": cves,
         "severity": severity_score(full, cves),
         "keywords": extract_keywords(full),
-        "matched_terms": match_terms(full, terms or []),
+        "matched_terms": match_terms(f"{full} {extra}", terms or []),
     }

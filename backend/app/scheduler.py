@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 
 from .collectors import COLLECTOR_CLASSES, BaseCollector, CollectorError, RawItem
 from .config import settings
@@ -30,14 +31,33 @@ from .seed import seed_categories
 log = logging.getLogger("netzwache.scheduler")
 
 
-def _enrich_batch(entries: list[tuple[str, str, str]], terms: list[str]) -> list[dict]:
+# Namen der Unique-Constraints auf posts (Postgres nennt sie beim Namen,
+# SQLite nennt die betroffenen Spalten) - nur ein Verstoß dagegen bedeutet
+# "dieser Beitrag liegt schon in der DB". Jeder andere Fehler (z.B. in den
+# Tag-/Kategorie-Zeilen) ist ein echter Fehlschlag und muss erneut versucht werden.
+_POST_DUPLICATE_MARKERS = (
+    "uq_post_platform_external",
+    "ix_posts_content_hash",
+    "posts.external_id",
+    "posts.content_hash",
+)
+
+
+def _is_post_duplicate(exc: Exception) -> bool:
+    if not isinstance(exc, IntegrityError):
+        return False
+    msg = str(exc)
+    return any(marker in msg for marker in _POST_DUPLICATE_MARKERS)
+
+
+def _enrich_batch(entries: list[tuple[str, str, str, str]], terms: list[str]) -> list[dict]:
     """Reichert mehrere Items in einem Rutsch an - läuft in einem separaten
     Prozess (ProcessPoolExecutor), damit die CPU-lastige Regex-/Keyword-Arbeit
     in enrich.py nicht um den GIL mit dem Event-Loop-Thread konkurriert. Ein
     Thread (asyncio.to_thread) hätte hier nicht gereicht: CPU-lastige Arbeit
     hält den GIL fast durchgehend, wodurch der Event-Loop-Thread trotzdem
     kaum zum Zug kommt - nur ein echter Prozess umgeht das."""
-    return [enrich(text, title, hint, terms) for text, title, hint in entries]
+    return [enrich(text, title, hint, terms, extra) for text, title, hint, extra in entries]
 
 
 # "spawn" statt "fork": plattformunabhängig (Tests laufen auch unter Windows)
@@ -343,8 +363,13 @@ class Engine:
         if not items:
             return out
 
-        # Phase 1: Dedup (kein DB-Session nötig - dedup läuft über Redis)
-        candidates: list[tuple[RawItem, str, str]] = []
+        # Phase 1: Dedup (kein DB-Session nötig - dedup läuft über Redis).
+        # seen() markiert atomar (SET NX) - dadurch können zwei gleichzeitig
+        # laufende Collector nicht denselben Beitrag doppelt einschleusen. Der
+        # Preis: alles hier Markierte muss bei jedem Misserfolg wieder
+        # freigegeben werden (siehe finally unten), sonst gälte ein nie
+        # gespeicherter Beitrag bis zum Ablauf der TTL als "bereits bekannt".
+        candidates: list[tuple[RawItem, str, str, str]] = []  # (item, text, hash, fp-key)
         for it in items:
             text = normalize(it.text)
             if not text and not it.title:
@@ -352,79 +377,111 @@ class Engine:
             h = content_hash(it.platform, it.external_id, text)
             if await dedup.seen(h):
                 continue
-            fp = text_fingerprint(f"{it.title} {text}")
-            if await dedup.seen(f"fp:{fp}"):
+            fp_key = f"fp:{text_fingerprint(f'{it.title} {text}')}"
+            if await dedup.seen(fp_key):
                 continue
-            candidates.append((it, text, h))
+            candidates.append((it, text, h, fp_key))
 
         if not candidates:
             return out
 
-        # Phase 2: Anreicherung - CPU-lastig, gebündelt in einem separaten Prozess
-        loop = asyncio.get_running_loop()
-        metas = await loop.run_in_executor(
-            _enrich_pool,
-            _enrich_batch,
-            [(text, it.title, it.category_hint) for it, text, _ in candidates],
-            terms,
-        )
+        # Schlüssel von Beiträgen, die tatsächlich in der DB liegen (neu
+        # festgeschrieben ODER als echtes Duplikat bereits vorhanden) - nur
+        # deren Markierung darf bestehen bleiben.
+        keep_marked: set[str] = set()
+        try:
+            # Phase 2: Anreicherung - CPU-lastig, gebündelt in einem separaten Prozess
+            loop = asyncio.get_running_loop()
+            metas = await loop.run_in_executor(
+                _enrich_pool,
+                _enrich_batch,
+                # Autor + Quelle nur fürs Tagging (siehe enrich.match_terms): dieselben
+                # Felder, die auch Volltextsuche und Fokus-Modus durchsuchen.
+                [
+                    (text, it.title, it.category_hint, f"{it.author or ''} {it.source or it.platform}")
+                    for it, text, _, _ in candidates
+                ],
+                terms,
+            )
 
-        # Phase 3: DB-Session nur für den eigentlichen Schreibzugriff öffnen
-        async with SessionLocal() as s:
-            for (it, text, h), meta in zip(candidates, metas):
-                post = Post(
-                    platform=it.platform,
-                    source=it.source or it.platform,
-                    external_id=it.external_id[:255],
-                    content_hash=h,
-                    author=(it.author or "")[:255],
-                    author_handle=(it.author_handle or "")[:255],
-                    title=it.title,
-                    text=text,
-                    url=it.url,
-                    lang=(it.lang or "")[:8],
-                    created_at=it.created_at,
-                    collected_at=datetime.now(timezone.utc),
-                    engagement=it.engagement,
-                    raw=it.raw,
-                    **meta,
-                )
-                # Savepoint: ein kollidierender Datensatz darf die anderen
-                # Einträge desselben Laufs nicht mit zurückrollen.
-                savepoint = await s.begin_nested()
-                s.add(post)
-                try:
-                    await s.flush()  # post.id wird gebraucht, um die Zuordnungen zu verknüpfen
-                    for cat_name in meta["categories"]:
-                        cat_id = self._category_ids.get(cat_name)
-                        if cat_id is not None:
-                            s.add(PostCategory(post_id=post.id, category_id=cat_id))
-                    for term in meta["matched_terms"]:
-                        s.add(PostTag(post_id=post.id, tag=term))
-                    for cve in meta["cve_ids"]:
-                        s.add(PostCve(post_id=post.id, cve=cve))
-                    await s.flush()
-                    await savepoint.commit()
-                except Exception as exc:
-                    await savepoint.rollback()
-                    await dedup.forget(h)
-                    log.debug("Insert verworfen (%s): %s", it.external_id, exc)
-                    continue
-                out.append(post.to_dict())
-
-            # Trefferzähler der Suchbegriffe fortschreiben
-            if out:
-                hits: dict[str, int] = {}
-                for p in out:
-                    for t in p["matched_terms"]:
-                        hits[t] = hits.get(t, 0) + 1
-                for term, n in hits.items():
-                    await s.execute(
-                        update(SearchTerm)
-                        .where(SearchTerm.term == term)
-                        .values(hits=SearchTerm.hits + n, last_hit_at=datetime.now(timezone.utc))
+            # Phase 3: DB-Session nur für den eigentlichen Schreibzugriff öffnen
+            async with SessionLocal() as s:
+                newly_added: list[str] = []
+                for (it, text, h, _fp_key), meta in zip(candidates, metas):
+                    post = Post(
+                        platform=it.platform,
+                        source=it.source or it.platform,
+                        external_id=it.external_id[:255],
+                        content_hash=h,
+                        author=(it.author or "")[:255],
+                        author_handle=(it.author_handle or "")[:255],
+                        title=it.title,
+                        text=text,
+                        url=it.url,
+                        lang=(it.lang or "")[:8],
+                        created_at=it.created_at,
+                        collected_at=datetime.now(timezone.utc),
+                        engagement=it.engagement,
+                        raw=it.raw,
+                        **meta,
                     )
-            await s.commit()
+                    # Savepoint: ein kollidierender Datensatz darf die anderen
+                    # Einträge desselben Laufs nicht mit zurückrollen.
+                    savepoint = await s.begin_nested()
+                    s.add(post)
+                    try:
+                        await s.flush()  # post.id wird gebraucht, um die Zuordnungen zu verknüpfen
+                        for cat_name in meta["categories"]:
+                            cat_id = self._category_ids.get(cat_name)
+                            if cat_id is not None:
+                                s.add(PostCategory(post_id=post.id, category_id=cat_id))
+                        for term in meta["matched_terms"]:
+                            s.add(PostTag(post_id=post.id, tag=term))
+                        for cve in meta["cve_ids"]:
+                            s.add(PostCve(post_id=post.id, cve=cve))
+                        await s.flush()
+                        await savepoint.commit()
+                    except Exception as exc:
+                        await savepoint.rollback()
+                        if _is_post_duplicate(exc):
+                            # Der Beitrag liegt schon in der DB (z.B. weil das
+                            # Redis-Gedächtnis zwischenzeitlich weg war) - kein
+                            # Fehler, und die Markierung soll bleiben, sonst
+                            # würde er bei jedem Lauf erneut versucht.
+                            keep_marked.add(h)
+                            log.debug("Beitrag bereits vorhanden (%s)", it.external_id)
+                        else:
+                            log.warning("Insert fehlgeschlagen (%s), wird beim nächsten Lauf erneut versucht: %s",
+                                        it.external_id, exc)
+                        continue
+                    out.append(post.to_dict())
+                    newly_added.append(h)
+
+                # Trefferzähler der Suchbegriffe fortschreiben
+                if out:
+                    hits: dict[str, int] = {}
+                    for p in out:
+                        for t in p["matched_terms"]:
+                            hits[t] = hits.get(t, 0) + 1
+                    for term, n in hits.items():
+                        await s.execute(
+                            update(SearchTerm)
+                            .where(SearchTerm.term == term)
+                            .values(hits=SearchTerm.hits + n, last_hit_at=datetime.now(timezone.utc))
+                        )
+                await s.commit()
+                # Erst NACH erfolgreichem Commit gelten diese Beiträge als gespeichert.
+                keep_marked.update(newly_added)
+        finally:
+            # Alles, was nicht sicher in der DB gelandet ist (Insert-Fehler,
+            # fehlgeschlagener Commit, DB nicht erreichbar, Abbruch beim
+            # Herunterfahren ...), gibt BEIDE Schlüssel frei - den Inhalts-Hash
+            # und den Text-Fingerabdruck. Früher wurde nur der Hash freigegeben:
+            # der Fingerabdruck blieb stehen und der Beitrag wurde danach für
+            # die ganze TTL (14 Tage) als Cross-Post-Duplikat verworfen.
+            release = [k for _it, _t, h, fp_key in candidates if h not in keep_marked for k in (h, fp_key)]
+            if release:
+                await dedup.forget_many(release)
         return out
 
     # ------------------------------------------------------------------

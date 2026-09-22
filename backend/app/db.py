@@ -8,6 +8,7 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import settings
+from .enrich import term_regex
 from .models import Base
 
 log = logging.getLogger("netzwache.db")
@@ -30,6 +31,12 @@ if engine.dialect.name == "sqlite":
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+        # SQLite kennt keinen Regex-Operator: die Trefferdefinition für
+        # ?term= (siehe enrich.term_regex) als SQL-Funktion bereitstellen,
+        # damit Dev/Tests exakt dieselbe Regel anwenden wie Postgres (~*).
+        dbapi_connection.create_function(
+            "nw_term_match", 2, lambda hay, term: 1 if term_regex(term or "").search(hay or "") else 0
+        )
 
 
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

@@ -25,6 +25,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => req<Record<string, unknown>>("/api/health"),
 
+  // `term` = Fokus-Begriff (Trefferdefinition siehe termMatch.ts), `offset` zum Blättern.
   posts: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(
       Object.entries(params)

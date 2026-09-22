@@ -17,6 +17,7 @@ import {
   setFocusWindowMinutes as persistFocusWindowMinutes,
 } from "./focusStorage";
 import { platformIcon } from "./icons";
+import { containsTerm, postHaystack } from "./termMatch";
 import type { Filters, Post, SourceState, Stats, Term, UiSettings } from "./types";
 import { esc, restrictToAlnum } from "./utils";
 import { LiveStream } from "./ws";
@@ -32,6 +33,7 @@ const DEFAULT_SETTINGS: UiSettings = {
 
 const state = {
   posts: [] as Post[],
+  focusPosts: [] as Post[], // alle vom Server gefundenen Treffer des Fokus-Begriffs - getrennt vom Feed-Puffer, siehe focusPool()
   postsTotal: 0, // "total" aus der letzten /api/posts-Antwort für die aktuellen Filter - für "gibt es noch mehr zum Nachladen?"
   loadingMore: false,
   sources: [] as SourceState[],
@@ -56,7 +58,11 @@ const state = {
     minSeverity: 0,
     paused: false,
     focusTerm: getStoredFocusTerm(),
-    focusWindowMinutes: getStoredFocusWindowMinutes(),
+    // Das Zeitfenster gehört zu EINEM Fokus: ohne gespeicherten Fokus-Begriff
+    // wird ein altes Fenster nicht wieder aufgenommen. Früher blieb z.B. "24 Std"
+    // über Neuladen und Fokus-Wechsel hinweg still aktiv, und jeder Tag zeigte
+    // dann nur noch einen Bruchteil seiner Treffer.
+    focusWindowMinutes: getStoredFocusTerm() ? getStoredFocusWindowMinutes() : null,
   } as Filters,
 };
 
@@ -361,32 +367,42 @@ document.addEventListener("click", (ev) => {
   if (anchor && !anchor.contains(ev.target as Node)) panel!.style.display = "none";
 });
 
-// Reines String.includes() matcht auch mitten in fremden Wörtern - z.B. steckt
-// "bsi" wörtlich in "web-BSI-te" ("website"). Bei kurzen Begriffen/Abkürzungen
-// (BSI, CVE, ...) erzeugt das massenhaft falsche Treffer, deren Anzahl zudem
-// rein zufällig davon abhängt, wie viele der gerade geladenen Beiträge das
-// Zufalls-Wort enthalten - genau das ließ z.B. "alle themen" (ein anderer,
-// zufällig anders zusammengesetzter Beitrags-Puffer) einen NIEDRIGEREN
-// "BSI"-Treffer zeigen als "cybersec", obwohl "alle themen" eine reine
-// Erweiterung des Filters ist. \b-Wortgrenzen (erweitert um deutsche Umlaute/
-// ß, die JS' Standard-\b nicht als Wortzeichen kennt) statt reinem
-// Enthaltensein behebt das.
-function containsWholeWord(haystack: string, term: string): boolean {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<![\\wäöüßÄÖÜ])${escaped}(?![\\wäöüßÄÖÜ])`, "i").test(haystack);
+// Trefferdefinition für Suchbegriffe: siehe termMatch.ts (Spiegel von
+// backend/app/enrich.py) - Wortanfang statt Teilstring ("bsi" in "we-bsi-te"),
+// aber deutsche Endungen/Zusammensetzungen bleiben erlaubt ("Sicherheitslücken").
+// Die frühere reine Ganzwort-Regel ("\b...\b") warf genau diese deutschen
+// Formen aus dem Fokus-Modus heraus.
+
+// Fokus-Treffer liegen bewusst getrennt vom normalen Feed-Puffer (state.posts):
+// Der Puffer wird bei Scrollen/Live-Stream/Filterwechsel ständig gekappt oder
+// ersetzt - lagen die Fokus-Treffer darin, gingen sie dabei verloren, und die
+// Trefferzahl hing davon ab, in welcher Reihenfolge man Tags angeklickt hat.
+const FOCUS_FETCH_MAX = 10_000; // Obergrenze pro Fokus-Begriff (20 Seiten à 500)
+let focusFetchToken = 0;
+
+const newestFirst = (a: Post, b: Post): number =>
+  (b.collected_at ?? "").localeCompare(a.collected_at ?? "") || b.id - a.id;
+
+// Im Fokus-Modus: alles, was der Server für den Begriff kennt, plus die
+// aktuellen Feed-Beiträge (u.a. frisch per Live-Stream eingetroffene).
+function focusPool(): Post[] {
+  if (!state.filters.focusTerm || !state.focusPosts.length) return state.posts;
+  const byId = new Map<number, Post>();
+  for (const p of state.focusPosts) byId.set(p.id, p);
+  for (const p of state.posts) byId.set(p.id, p);
+  return [...byId.values()].sort(newestFirst);
 }
 
-function matchesFilter(p: Post): boolean {
+function matchesFilter(p: Post, ignoreFocusWindow = false): boolean {
   const f = state.filters;
   if (f.platform !== "all" && p.platform !== f.platform) return false;
   if (f.category !== "all" && !(p.categories || []).includes(f.category)) return false;
   if (f.minSeverity && p.severity < f.minSeverity) return false;
-  // Bewusst per Freitext-Suche geprüft (wie f.query unten), nicht über
-  // matched_terms: ein Beitrag, der schon vor dem Anlegen dieses Begriffs
-  // existierte, wurde nie rückwirkend mit ihm getaggt, obwohl sein Text ihn
-  // enthalten kann - matched_terms wäre hier also fälschlich leer.
+  // Bewusst per Text geprüft, nicht über matched_terms: ein Beitrag, der vor
+  // dem Anlegen dieses Begriffs existierte (oder noch nach der alten Regel
+  // getaggt wurde), hat matched_terms, die nicht zur heutigen Definition passen.
   if (f.focusTerm) {
-    if (!containsWholeWord(`${p.title} ${p.text} ${p.author} ${p.source}`, f.focusTerm)) return false;
+    if (!containsTerm(postHaystack(p), f.focusTerm)) return false;
     // Zeitfenster gilt nur im Fokus-Modus - blendet auf Wunsch alles vor
     // "jetzt"/"1h"/"24h" aus, damit man nach dem Fokussieren nicht durch bis
     // zu 200 gepufferte Treffer scrollen muss. Bewusst collected_at statt
@@ -395,14 +411,14 @@ function matchesFilter(p: Post): boolean {
     // sein als der Zeitpunkt, zu dem wir den Beitrag tatsächlich eingesammelt
     // haben - sonst würde "Jetzt" gerade erst hereingekommene Treffer
     // rausfiltern, die im Feed als "vor 1m" angezeigt werden.
-    if (f.focusWindowMinutes) {
+    if (f.focusWindowMinutes && !ignoreFocusWindow) {
       const ts = p.collected_at ? new Date(p.collected_at).getTime() : 0;
       if (Date.now() - ts > f.focusWindowMinutes * 60_000) return false;
     }
   }
   if (f.query) {
     const q = f.query.toLowerCase();
-    if (!`${p.title} ${p.text} ${p.author} ${p.source}`.toLowerCase().includes(q)) return false;
+    if (!postHaystack(p).toLowerCase().includes(q)) return false;
   }
   return true;
 }
@@ -420,6 +436,11 @@ function hasActiveFilter(): boolean {
 function setFocusTerm(term: string | null): void {
   state.filters.focusTerm = state.filters.focusTerm === term ? null : term;
   persistFocusTerm(state.filters.focusTerm);
+  // Jeder Fokus-Wechsel (neuer Begriff ODER Fokus aufgehoben) beginnt ohne
+  // Zeitfenster und ohne Treffer des vorherigen Begriffs.
+  state.filters.focusWindowMinutes = null;
+  persistFocusWindowMinutes(null);
+  state.focusPosts = [];
   paintFeed();
   paintSources();
   paintTerms();
@@ -427,27 +448,25 @@ function setFocusTerm(term: string | null): void {
   if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
 }
 
-// Fokus-Modus filtert nur bereits geladene Beiträge (state.posts) - standard-
-// mäßig aber nur die letzten ~150-400. Ein Tag mit vielen Treffern insgesamt
-// (Chip zeigt z.B. "201") kann trotzdem "Kein Treffer" zeigen, wenn zufällig
-// keiner der aktuell geladenen Beiträge darunter ist. Holt beim Aktivieren
-// gezielt passende Beiträge nach - weiterhin nur ein rein lesender GET, wie
-// von der Fokus-Modus-Spezifikation erlaubt.
+// Holt ALLE Treffer des Fokus-Begriffs vom Server (?term= - dieselbe Definition
+// wie beim Filtern im Browser, siehe termMatch.ts) und legt sie in
+// state.focusPosts ab, getrennt vom Feed-Puffer. Seitenweise (der Server liefert
+// höchstens 500 pro Anfrage): früher wurde nur die erste Seite geholt, ein Tag
+// mit 800 Treffern zeigte also nie mehr als 500. Nur ein rein lesender GET.
+// Wird einmal pro Fokus-Wechsel aufgerufen (und nach Neuladen/Snapshot) - der
+// Live-Stream ergänzt neue Treffer danach über state.posts.
 async function hydrateFocusMatches(term: string): Promise<void> {
+  const token = ++focusFetchToken;
+  const stale = () => token !== focusFetchToken || state.filters.focusTerm !== term;
   try {
-    const res = await api.posts({ q: term, limit: 500 });
-    if (state.filters.focusTerm !== term) return; // Fokus zwischenzeitlich gewechselt/aufgehoben
-    const known = new Set(state.posts.map((p) => p.id));
-    const fresh = res.items.filter((p) => !known.has(p.id));
-    if (!fresh.length) return;
-    // Feste Kappungs-Reserve (früher +200) hat frisch nachgeladene Treffer
-    // wieder verworfen, sobald state.posts durch normales Scrollen/Live-
-    // Stream schon nah an MAX_BUFFER war - genau der Fall, der die Fokus-
-    // Trefferzahl bis zum Neuladen falsch (zu niedrig) anzeigen ließ. Reserve
-    // muss mindestens so groß sein wie das, was gerade tatsächlich neu dazu-
-    // kommt, sonst frisst die Kappung genau die Treffer, die hier erst geholt
-    // wurden.
-    state.posts = [...state.posts, ...fresh].slice(0, MAX_BUFFER + fresh.length);
+    const collected: Post[] = [];
+    for (let offset = 0; offset < FOCUS_FETCH_MAX; offset += PAGE_SIZE) {
+      const res = await api.posts({ term, limit: PAGE_SIZE, offset });
+      if (stale()) return; // Fokus zwischenzeitlich gewechselt/aufgehoben
+      collected.push(...res.items);
+      if (offset + PAGE_SIZE >= res.total) break;
+    }
+    state.focusPosts = collected;
     paintFeed();
     paintSources();
   } catch {
@@ -457,7 +476,8 @@ async function hydrateFocusMatches(term: string): Promise<void> {
 
 // ---------------------------------------------------------------- Render
 function paintFeed(): void {
-  let visible = state.posts.filter(matchesFilter);
+  const pool = focusPool();
+  let visible = pool.filter((p) => matchesFilter(p));
   if (state.resurfacedPostId != null) {
     const idx = visible.findIndex((p) => p.id === state.resurfacedPostId);
     if (idx > 0) {
@@ -484,7 +504,15 @@ function paintFeed(): void {
   els.focusBar.style.display = focus ? "flex" : "none";
   if (focus) {
     els.focusBarTerm.textContent = `"${focus}"`;
-    els.focusBarCount.textContent = ` · ${visible.length} Treffer`;
+    // Mit aktivem Zeitfenster zusätzlich die Gesamtzahl ohne Fenster nennen -
+    // sonst wirkt "4 Treffer" bei "24 Std" wie fehlende Daten, obwohl der
+    // Begriff insgesamt hunderte Treffer hat.
+    if (state.filters.focusWindowMinutes) {
+      const allTime = pool.filter((p) => matchesFilter(p, true)).length;
+      els.focusBarCount.textContent = ` · ${visible.length} Treffer im Zeitraum · ${allTime} gesamt`;
+    } else {
+      els.focusBarCount.textContent = ` · ${visible.length} Treffer`;
+    }
     els.focusWindowToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
       b.classList.toggle("active", Number(b.dataset.min) === (state.filters.focusWindowMinutes ?? 0));
     });
@@ -524,7 +552,7 @@ function isRateLimited(): boolean {
 
 function resurfaceOnce(): void {
   if (state.filters.paused) return;
-  const visible = state.posts.filter(matchesFilter);
+  const visible = focusPool().filter((p) => matchesFilter(p));
   if (visible.length < 4) return;
   const pool = visible.slice(3).filter((p) => p.id !== state.resurfacedPostId);
   if (!pool.length) return;
@@ -561,8 +589,8 @@ function paintSources(): void {
   const focus = state.filters.focusTerm;
   const activePlatforms = focus
     ? new Set(
-        state.posts
-          .filter((p) => (p.matched_terms || []).includes(focus))
+        focusPool()
+          .filter((p) => containsTerm(postHaystack(p), focus))
           .map((p) => p.platform),
       )
     : null;
@@ -798,15 +826,10 @@ async function reloadPosts(): Promise<void> {
     const res = await api.posts({ ...postsQueryParams(), limit: PAGE_SIZE, offset: 0 });
     state.posts = res.items;
     state.postsTotal = res.total;
+    // Die Fokus-Treffer liegen getrennt in state.focusPosts und bleiben von
+    // diesem Ersetzen des Feed-Puffers unberührt (Plattform-/Kategorie-Tab,
+    // Suche, Collect-Now) - kein erneutes Nachladen nötig.
     paintFeed();
-    // reloadPosts ersetzt state.posts komplett durch nur die neuesten PAGE_SIZE
-    // Beiträge des neuen Filters (Plattform-/Kategorie-Tab, Suche, Collect-Now).
-    // Ein aktiver Fokus-Begriff würde dadurch plötzlich nur noch gegen diesen
-    // winzigen, frischen Puffer geprüft - ohne erneutes Nachladen zeigt die
-    // Fokus-Leiste dann einen viel zu niedrigen "Treffer"-Wert (z.B. nach
-    // Kategoriewechsel von "cybersec" auf "alle themen": weniger statt mehr
-    // Treffer, obwohl der Filter weiter wird). Siehe hydrateFocusMatches().
-    if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
   } catch (e) {
     toast(`Laden fehlgeschlagen: ${e}`, true);
   }
@@ -846,13 +869,6 @@ function prependPosts(incoming: Post[]): void {
   if (!fresh.length) return;
 
   state.posts = [...fresh.reverse(), ...state.posts].slice(0, MAX_BUFFER);
-  // Wie reloadPosts(): jeder Live-Stream-Schub kappt den Puffer wieder auf
-  // MAX_BUFFER, wodurch mit der Zeit genau die älteren, schon fokus-
-  // nachgeladenen Treffer vom Tail verdrängt werden - ohne dieses erneute
-  // Nachladen sinkt die Fokus-Trefferzahl langsam, je länger die Seite mit
-  // aktivem Live-Stream offen bleibt, bis ein Neuladen sie wieder korrigiert
-  // (siehe hydrateFocusMatches()).
-  if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
 
   if (state.filters.paused) return;
 
@@ -1044,7 +1060,8 @@ const stream = new LiveStream((event, data) => {
       paintSources();
       // Fokus kann aus sessionStorage stammen (Reload im selben Tab) - die
       // Snapshot-Beiträge allein enthalten dann oft nicht genug Treffer,
-      // siehe hydrateFocusMatches().
+      // siehe hydrateFocusMatches(). Auch nach einer WebSocket-
+      // Wiederverbindung: währenddessen eingetroffene Treffer nachziehen.
       if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
       break;
     case "posts":
@@ -1070,8 +1087,9 @@ const stream = new LiveStream((event, data) => {
       // gelöscht - auch für andere gerade offene Tabs den Puffer leeren.
       // Wer die Aktion selbst ausgelöst hat, hat state.posts (und die
       // Meldung) schon direkt bekommen - hier nur noch für alle ANDEREN.
-      if (state.posts.length) {
+      if (state.posts.length || state.focusPosts.length) {
         state.posts = [];
+        state.focusPosts = [];
         paintFeed();
         toast(`Alle Beiträge gelöscht (${(data as { removed: number }).removed})`);
       }
@@ -1118,6 +1136,8 @@ async function boot(): Promise<void> {
   applyAdminUi();
 
   await reloadPosts();
+  // Fokus kann aus sessionStorage stammen (Neuladen im selben Tab).
+  if (state.filters.focusTerm) void hydrateFocusMatches(state.filters.focusTerm);
   await refreshStats();
 
   stream.connect();
