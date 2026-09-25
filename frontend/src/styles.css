@@ -799,6 +799,16 @@ input[type="range"] { accent-color: var(--accent); width: 92px; padding: 0; bord
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.focus-loading-spin {
+  display: inline-block;
+  width: 10px; height: 10px;
+  margin-left: 6px;
+  vertical-align: -1px;
+  border-radius: 50%;
+  border: 2px solid var(--line-soft);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
 .term-status.done { color: var(--accent); }
 
 .term-search-wrap { position: relative; margin-bottom: 10px; }

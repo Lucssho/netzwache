@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS: UiSettings = {
 
 const state = {
   posts: [] as Post[],
+  focusLoading: false,
   focusPosts: [] as Post[], // alle vom Server gefundenen Treffer des Fokus-Begriffs - getrennt vom Feed-Puffer, siehe focusPool()
   postsTotal: 0, // "total" aus der letzten /api/posts-Antwort für die aktuellen Filter - für "gibt es noch mehr zum Nachladen?"
   loadingMore: false,
@@ -441,6 +442,7 @@ function setFocusTerm(term: string | null): void {
   state.filters.focusWindowMinutes = null;
   persistFocusWindowMinutes(null);
   state.focusPosts = [];
+  state.focusLoading = false;
   paintFeed();
   paintSources();
   paintTerms();
@@ -459,18 +461,26 @@ async function hydrateFocusMatches(term: string): Promise<void> {
   const token = ++focusFetchToken;
   const stale = () => token !== focusFetchToken || state.filters.focusTerm !== term;
   try {
+    state.focusLoading = true;
+    paintFeed();
     const collected: Post[] = [];
     for (let offset = 0; offset < FOCUS_FETCH_MAX; offset += PAGE_SIZE) {
       const res = await api.posts({ term, limit: PAGE_SIZE, offset });
       if (stale()) return; // Fokus zwischenzeitlich gewechselt/aufgehoben
       collected.push(...res.items);
+      // Zwischenstand sofort zeigen, damit die Trefferzahl sichtbar mitwächst
+      state.focusPosts = [...collected];
+      paintFeed();
+      paintSources();
       if (offset + PAGE_SIZE >= res.total) break;
     }
-    state.focusPosts = collected;
-    paintFeed();
-    paintSources();
   } catch {
     /* stiller Fallback - Fokus bleibt auf den bereits geladenen Beiträgen beschränkt */
+  } finally {
+    if (!stale()) {
+      state.focusLoading = false;
+      paintFeed();
+    }
   }
 }
 
@@ -512,6 +522,12 @@ function paintFeed(): void {
       els.focusBarCount.textContent = ` · ${visible.length} Treffer im Zeitraum · ${allTime} gesamt`;
     } else {
       els.focusBarCount.textContent = ` · ${visible.length} Treffer`;
+    }
+    if (state.focusLoading) {
+      const spin = document.createElement("span");
+      spin.className = "focus-loading-spin";
+      spin.title = "Lade weitere Treffer …";
+      els.focusBarCount.append(spin);
     }
     els.focusWindowToggle.querySelectorAll<HTMLButtonElement>("button").forEach((b) => {
       b.classList.toggle("active", Number(b.dataset.min) === (state.filters.focusWindowMinutes ?? 0));
