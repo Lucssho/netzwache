@@ -113,15 +113,34 @@ def text_fingerprint(text: str) -> str:
     return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()
 
 
+# Eine Nebenkategorie bleibt nur, wenn sie fast so stark ist wie die stärkste:
+# mindestens SECONDARY_MIN_SCORE Treffer UND mindestens SECONDARY_MIN_RATIO der
+# Treffer der Hauptkategorie. Gleichstand mit der Hauptkategorie bleibt erhalten.
+# Beispiel: 3x IT-Wörter + 1x Cyber-Wort -> nur "it"; 3x IT + 2x Cyber -> beide.
+SECONDARY_MIN_SCORE = 2
+SECONDARY_MIN_RATIO = 0.6
+
+
 def detect_categories(text: str, hint: str = "") -> list[str]:
-    """Ordnet einen Text den Kategorien zu (Mehrfachzuordnung möglich)."""
-    low = normalize(text).lower()
+    """Ordnet einen Text den Kategorien zu. Die Kategorie mit den meisten
+    Schlüsselwort-Treffern ist die Hauptkategorie; schwache Nebenkategorien
+    (einzelner Zufallstreffer neben mehreren starken) werden verworfen, damit
+    sich Themen nicht gegenseitig verwässern. Schlüsselwörter zählen nach
+    derselben Wortgrenzen-Regel wie Suchbegriffe (term_regex), nicht als
+    Teilstring - sonst trifft z.B. "ki" in "Kirche"."""
+    low = normalize(text)
     found: list[tuple[str, int]] = []
     for cat, words in CATEGORY_KEYWORDS.items():
-        score = sum(1 for w in words if w in low)
+        score = sum(1 for w in words if term_regex(w).search(low))
         if score:
             found.append((cat, score))
     found.sort(key=lambda x: -x[1])
+    if found:
+        top = found[0][1]
+        found = [
+            (c, s) for c, s in found
+            if s == top or (s >= SECONDARY_MIN_SCORE and s >= SECONDARY_MIN_RATIO * top)
+        ]
     cats = [c for c, _ in found]
     if hint and hint in CATEGORIES and hint not in cats:
         cats.insert(0, hint)

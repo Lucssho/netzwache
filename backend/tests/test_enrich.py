@@ -44,6 +44,28 @@ def test_categories_fallback():
     assert detect_categories("xyz qrs tuv") == ["alltag"]
 
 
+def test_weak_secondary_category_is_dropped():
+    # Drucker/Server/Netzwerk/Software = 4x IT, nur "passwort" = 1x Cyber -> nur IT
+    cats = detect_categories("Drucker per Netzwerk am Server einrichten: Software und Passwort setzen")
+    assert cats == ["it"]
+
+
+def test_strong_secondary_category_is_kept():
+    # 2x IT (linux, docker) und 2x Cyber (ransomware, exploit) -> beide, kein Verwässern
+    cats = detect_categories("Linux Docker Hosts: Ransomware nutzt Exploit")
+    assert set(cats) == {"it", "cybersecurity"}
+
+
+def test_dominant_cyber_beats_single_it_word():
+    cats = detect_categories("Ransomware-Angriff: Phishing, Datenleck und Exploit auf einem Server")
+    assert cats == ["cybersecurity"]
+
+
+def test_category_keywords_need_word_boundaries():
+    # "ki" darf nicht in "Kirche", "uni" nicht in "Union" und "rest" nicht in "interessant" anschlagen
+    assert detect_categories("Die Kirche der Union ist interessant") == ["alltag"]
+
+
 def test_severity_rises_with_cve():
     low = severity_score("normales update verfügbar", [])
     high = severity_score("zero-day wird aktiv ausgenutzt, ransomware", ["CVE-2026-1"])
